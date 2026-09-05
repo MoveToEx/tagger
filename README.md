@@ -83,7 +83,7 @@ After inference completes, you are supposed to check tags one by one. You can us
 ## Tests
 
 ```powershell
-uv run pytest
+uv run python -m pytest
 ```
 
 Qt tests run with the offscreen platform plugin and do not require a visible
