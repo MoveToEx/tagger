@@ -834,6 +834,9 @@ def test_toolbar_tag_search_enter_accepts_active_completion(
 ) -> None:
     create_png(tmp_path / "sample.png")
     (tmp_path / "sample.txt").write_text("dog\n", encoding="utf-8")
+    library_path = tmp_path / "data" / "danbooru_tags.csv"
+    library_path.parent.mkdir()
+    library_path.write_text("name,post_count\nred,100\n", encoding="utf-8")
 
     window = MainWindow()
     qtbot.addWidget(window)
