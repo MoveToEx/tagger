@@ -48,10 +48,10 @@ from PySide6.QtWidgets import (
 )
 
 from .domain import ImageEntry
-from .paths import PROJECT_ROOT, TAG_LIBRARY_PATH
+from .paths import get_tag_library_path
 
 
-DEFAULT_TAG_LIBRARY_PATH = TAG_LIBRARY_PATH
+DEFAULT_TAG_LIBRARY_PATH = get_tag_library_path()
 DATASET_ID = "qdlabs/danbooru-tags"
 DATASET_TAGS_URL = (
     f"https://huggingface.co/datasets/{DATASET_ID}/resolve/main/tags.jsonl"
@@ -105,14 +105,16 @@ class TagLibrary(QObject):
 
     def __init__(
         self,
-        csv_path: Path = DEFAULT_TAG_LIBRARY_PATH,
+        csv_path: Path | None = None,
         parent: QObject | None = None,
         *,
         underscores_to_spaces: bool = False,
         escape_parentheses: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.csv_path = csv_path
+        self.csv_path = (
+            get_tag_library_path() if csv_path is None else csv_path
+        )
         self.underscores_to_spaces = underscores_to_spaces
         self.escape_parentheses = escape_parentheses
         self._danbooru: dict[str, tuple[str, int]] = {}
@@ -525,13 +527,16 @@ def _find_field(fieldnames: Sequence[str], choices: Sequence[str]) -> str:
 
 
 def download_danbooru_tags(
-    destination: Path = DEFAULT_TAG_LIBRARY_PATH,
+    destination: Path | None = None,
     *,
     minimum_posts: int = 20,
     proxy: str | None = "",
     progress: Callable[[int, str], None] | None = None,
     source_url: str | None = None,
 ) -> int:
+    destination = (
+        get_tag_library_path() if destination is None else destination
+    )
     proxy_url = proxy.strip() if proxy is not None else None
     proxy_handler = (
         ProxyHandler()
@@ -671,12 +676,14 @@ class DownloadTagsDialog(QDialog):
     def __init__(
         self,
         parent=None,
-        destination: Path = DEFAULT_TAG_LIBRARY_PATH,
+        destination: Path | None = None,
         *,
         proxy: str | None = "",
     ) -> None:
         super().__init__(parent)
-        self.destination = destination
+        self.destination = (
+            get_tag_library_path() if destination is None else destination
+        )
         self.proxy = proxy.strip() if proxy is not None else None
         self._thread: QThread | None = None
         self._worker: _DownloadWorker | None = None
@@ -687,7 +694,7 @@ class DownloadTagsDialog(QDialog):
         self.minimum_posts_input.setRange(0, 2_000_000_000)
         self.minimum_posts_input.setValue(20)
         self.minimum_posts_input.setSuffix(" posts")
-        self.destination_label = QLabel(str(destination))
+        self.destination_label = QLabel(str(self.destination))
         self.destination_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )

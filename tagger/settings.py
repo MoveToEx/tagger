@@ -33,9 +33,12 @@ from .ai_tagger import (
     ai_dependencies_available,
     missing_ai_dependencies,
 )
-from .paths import SETTINGS_PATH, ensure_data_directory
+from .paths import (
+    ensure_data_directory,
+    get_settings_path,
+    get_tag_library_path,
+)
 from .tag_library import (
-    DEFAULT_TAG_LIBRARY_PATH,
     DownloadTagsDialog,
     TagLibrary,
     get_tag_library_file_info,
@@ -190,7 +193,7 @@ def _decode_value(value: object) -> object:
 
 def create_app_settings() -> JsonSettings:
     ensure_data_directory()
-    return JsonSettings(SETTINGS_PATH)
+    return JsonSettings(get_settings_path())
 
 
 class SettingsDialog(QDialog):
@@ -207,7 +210,7 @@ class SettingsDialog(QDialog):
         self.tag_library_path = (
             tag_library.csv_path
             if tag_library is not None
-            else DEFAULT_TAG_LIBRARY_PATH
+            else get_tag_library_path()
         )
         self._applied_transform_options = (
             cast(
