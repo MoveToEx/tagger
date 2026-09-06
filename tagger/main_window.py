@@ -635,7 +635,7 @@ class MainWindow(QMainWindow):
             QItemSelectionModel.SelectionFlag.ClearAndSelect
             | QItemSelectionModel.SelectionFlag.Rows,
         )
-        delete_action = QAction("Delete Image and Tag...", self)
+        delete_action = QAction("Delete", self)
         delete_action.triggered.connect(self._delete_current_image_and_tag)
         menu = QMenu(self)
         menu.addAction(delete_action)
@@ -1080,10 +1080,10 @@ class MainWindow(QMainWindow):
         menu.exec(self.tag_list.viewport().mapToGlobal(position))
 
     def _create_tag_context_menu(self) -> QMenu:
-        copy_action = QAction("Copy Selected Tags", self)
+        copy_action = QAction("Copy", self)
         copy_action.setEnabled(bool(self._selected_tag_text()))
         copy_action.triggered.connect(self._copy_selected_tags)
-        delete_action = QAction("Delete Selected Tags", self)
+        delete_action = QAction("Delete", self)
         delete_action.setEnabled(bool(self.tag_list.selectedItems()))
         delete_action.triggered.connect(self._delete_selected_tags)
         menu = QMenu(self)

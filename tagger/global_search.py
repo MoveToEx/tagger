@@ -130,7 +130,7 @@ class GlobalTagSearchDialog(QDialog):
         }:
             self.results.clearSelection()
             self.results.selectRow(index.row())
-        copy_action = QAction("Copy Selected Tags", self)
+        copy_action = QAction("Copy", self)
         copy_action.setEnabled(bool(self._selected_tags()))
         copy_action.triggered.connect(self._copy_selected_tags)
         menu = QMenu(self)

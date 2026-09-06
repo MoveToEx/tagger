@@ -1231,7 +1231,7 @@ def test_main_tag_deletion_requires_confirmation_from_button_and_context_menu(
     assert tag_path.read_text(encoding="utf-8") == "dog, cat, bird\n"
 
     context_menu = window._create_tag_context_menu()
-    assert context_menu.actions()[1].text() == "Delete Selected Tags"
+    assert context_menu.actions()[1].text() == "Delete"
     context_menu.actions()[1].trigger()
 
     assert tag_path.read_text(encoding="utf-8") == "cat\n"
