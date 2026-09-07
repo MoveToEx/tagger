@@ -34,6 +34,7 @@ from .domain import ImageEntry, normalize_tags
 from .paths import get_model_directory
 from .preview import ImageView, PreviewLoader
 from .storage import BatchCommitResult, BatchPreflightError, WriteRequest, write_tags_batch
+from .widgets import stabilize_widget_size
 
 
 MODEL_REPOSITORIES = {
@@ -156,6 +157,7 @@ class ModelManagementDialog(QDialog):
         self.download_location_input = QComboBox()
         self.download_location_input.addItem("User home directory", "user")
         self.download_location_input.addItem("Local data directory", "local")
+        stabilize_widget_size(self.download_location_input)
         self.download_location_input.currentIndexChanged.connect(
             self._download_location_changed
         )
@@ -442,14 +444,17 @@ class AITaggingDialog(QDialog):
             if available and first_available_index == -1:
                 first_available_index = index
         self.model_input.setCurrentIndex(first_available_index)
+        stabilize_widget_size(self.model_input)
         self.general_threshold_input = QDoubleSpinBox()
         self.general_threshold_input.setRange(0.0, 1.0)
         self.general_threshold_input.setSingleStep(0.05)
         self.general_threshold_input.setValue(0.35)
+        stabilize_widget_size(self.general_threshold_input, vertical_padding=2)
         self.character_threshold_input = QDoubleSpinBox()
         self.character_threshold_input.setRange(0.0, 1.0)
         self.character_threshold_input.setSingleStep(0.05)
         self.character_threshold_input.setValue(0.75)
+        stabilize_widget_size(self.character_threshold_input, vertical_padding=2)
         form = QFormLayout()
         form.addRow("Model", self.model_input)
         form.addRow("General threshold", self.general_threshold_input)

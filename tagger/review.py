@@ -27,6 +27,7 @@ from .domain import ImageEntry, ReviewSession, parse_tags
 from .preview import ImageView, PreviewLoader
 from .storage import BatchCommitResult, BatchPreflightError, WriteRequest, write_tags_batch
 from .tag_library import TagLibrary, attach_tag_completer
+from .widgets import stabilize_widget_size
 
 
 def _folder_ancestors(path: Path) -> list[Path]:
@@ -115,6 +116,7 @@ class ReviewDialog(QDialog):
         self.temporary_completer = attach_tag_completer(
             self.temporary_input, tag_library
         )
+        stabilize_widget_size(self.temporary_input, minimum_width=256)
         self.temporary_add_button = QPushButton("+")
         self.temporary_add_button.setFixedWidth(34)
         self.temporary_add_button.setToolTip("Add tags to the current image and keep them")

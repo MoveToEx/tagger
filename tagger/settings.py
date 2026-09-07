@@ -51,6 +51,7 @@ from .tag_library import (
     TagLibrary,
     get_tag_library_file_info,
 )
+from .widgets import stabilize_widget_size
 
 
 UNDERSCORES_SETTING = "autocomplete/transform_underscores_to_spaces"
@@ -350,6 +351,7 @@ class SettingsDialog(QDialog):
         self.scrolling_behavior_input.addItem(
             "Navigate at end", SCROLL_NAVIGATE_AT_END
         )
+        stabilize_widget_size(self.scrolling_behavior_input)
         selected_index = self.scrolling_behavior_input.findData(
             self._applied_scrolling_behavior
         )
@@ -532,6 +534,7 @@ class SettingsDialog(QDialog):
         self.proxy_input = QLineEdit(self._applied_proxy_url)
         self.proxy_input.setPlaceholderText("http://127.0.0.1:7890")
         self.proxy_input.setClearButtonEnabled(True)
+        stabilize_widget_size(self.proxy_input, minimum_width=426)
         selected_radio = {
             NO_PROXY: self.no_proxy_radio,
             SYSTEM_PROXY: self.system_proxy_radio,

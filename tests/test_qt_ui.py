@@ -18,14 +18,19 @@ from PySide6.QtGui import (
     QDropEvent,
     QGuiApplication,
     QImage,
+    QPainter,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
+    QDoubleSpinBox,
     QGroupBox,
     QInputDialog,
     QLineEdit,
     QMenu,
     QMessageBox,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionSpinBox,
     QTreeWidget,
     QWidget,
 )
@@ -87,6 +92,43 @@ def create_cached_model(cache_directory: Path, repo_id: str) -> None:
     snapshot.mkdir(parents=True)
     (snapshot / "config.json").touch()
     (snapshot / "selected_tags.csv").touch()
+
+
+def assert_stable_widget_size(
+    widget: QWidget,
+    *,
+    minimum_width: int = 0,
+    vertical_padding: int = 0,
+) -> None:
+    assert widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
+    assert widget.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Fixed
+    assert widget.minimumWidth() == widget.maximumWidth()
+    assert widget.width() >= max(widget.sizeHint().width() + 8, minimum_width)
+    assert widget.width() % 2 == 0
+    assert widget.minimumHeight() == widget.maximumHeight()
+    assert widget.height() >= widget.sizeHint().height() + vertical_padding
+    assert widget.height() % 2 == 0
+
+
+def render_spin_box_control(
+    spin_box: QDoubleSpinBox, *, hovered: bool
+) -> QImage:
+    option = QStyleOptionSpinBox()
+    spin_box.initStyleOption(option)
+    option.state &= ~QStyle.StateFlag.State_MouseOver
+    option.activeSubControls = QStyle.SubControl.SC_None
+    if hovered:
+        option.state |= QStyle.StateFlag.State_MouseOver
+        option.activeSubControls = QStyle.SubControl.SC_SpinBoxUp
+
+    image = QImage(spin_box.size(), QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    spin_box.style().drawComplexControl(
+        QStyle.ComplexControl.CC_SpinBox, option, painter, spin_box
+    )
+    assert painter.end()
+    return image
 
 
 def test_model_settings_support_local_downloads_and_report_locations(
@@ -193,6 +235,29 @@ def test_ai_tagger_disables_absent_models_in_selector(
     dialog = AITaggingDialog([entry], root_directory=tmp_path)
     qtbot.addWidget(dialog)
 
+    assert_stable_widget_size(dialog.model_input)
+    assert_stable_widget_size(
+        dialog.general_threshold_input, vertical_padding=2
+    )
+    assert_stable_widget_size(
+        dialog.character_threshold_input, vertical_padding=2
+    )
+    for threshold_input in (
+        dialog.general_threshold_input,
+        dialog.character_threshold_input,
+    ):
+        assert render_spin_box_control(
+            threshold_input, hovered=False
+        ) == render_spin_box_control(threshold_input, hovered=True)
+
+    dialog.show()
+    qtbot.mouseClick(
+        dialog.general_threshold_input,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(dialog.general_threshold_input.width() - 8, 5),
+    )
+    assert dialog.general_threshold_input.value() == 0.4
+
     model = dialog.model_input.model()
     assert [
         bool(model.flags(model.index(index, 0)) & Qt.ItemFlag.ItemIsEnabled)
@@ -286,6 +351,23 @@ def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> No
     assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE
     assert get_scrolling_behavior(JsonSettings(settings_path)) == SCROLL_NAVIGATE
     assert applied == [SCROLL_NAVIGATE]
+
+
+def test_settings_select_controls_use_stable_geometry(
+    qtbot, tmp_path: Path
+) -> None:
+    settings_dialog = SettingsDialog(
+        settings=JsonSettings(tmp_path / "settings.json")
+    )
+    model_dialog = ModelManagementDialog()
+    qtbot.addWidget(settings_dialog)
+    qtbot.addWidget(model_dialog)
+
+    for combo_box in (
+        settings_dialog.scrolling_behavior_input,
+        model_dialog.download_location_input,
+    ):
+        assert_stable_widget_size(combo_box)
 
 
 def test_scrolling_behavior_defaults_to_pan(tmp_path: Path) -> None:
@@ -470,6 +552,7 @@ def test_settings_tree_stages_proxy_until_applied(qtbot, tmp_path: Path) -> None
     assert dialog.custom_proxy_radio.isChecked()
     assert dialog.proxy_input.isEnabled()
     assert dialog.proxy_input.text() == "http://old-proxy:8080"
+    assert_stable_widget_size(dialog.proxy_input, minimum_width=426)
 
     dialog.proxy_input.setText("  http://new-proxy:3128  ")
 
@@ -2083,6 +2166,8 @@ def test_review_extra_tag_input_accepts_spaces(qtbot, tmp_path: Path) -> None:
     qtbot.addWidget(dialog)
     dialog.show()
     dialog.temporary_input.setFocus()
+
+    assert_stable_widget_size(dialog.temporary_input, minimum_width=256)
 
     qtbot.keyClicks(dialog.temporary_input, "two words")
 
