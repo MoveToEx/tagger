@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import override
 
 from PySide6.QtCore import QEvent, QObject, QThread, Signal, Qt
-from PySide6.QtGui import QCloseEvent, QKeyEvent
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from .domain import ImageEntry, normalize_tags
+from .paths import get_model_directory
 from .preview import ImageView, PreviewLoader
 from .storage import BatchCommitResult, BatchPreflightError, WriteRequest, write_tags_batch
 
@@ -58,14 +59,19 @@ def ai_dependencies_available() -> bool:
     return not missing_ai_dependencies()
 
 
-def _repo_cache_path(repo_id: str) -> Path:
+def _user_model_cache_directory() -> Path:
     from huggingface_hub.constants import HF_HUB_CACHE
 
-    return Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}"
+    return Path(HF_HUB_CACHE)
 
 
-def _model_is_cached(repo_id: str) -> bool:
-    snapshots = _repo_cache_path(repo_id) / "snapshots"
+def _repo_cache_path(repo_id: str, cache_dir: Path | None = None) -> Path:
+    directory = cache_dir or _user_model_cache_directory()
+    return directory / f"models--{repo_id.replace('/', '--')}"
+
+
+def _model_is_cached(repo_id: str, cache_dir: Path | None = None) -> bool:
+    snapshots = _repo_cache_path(repo_id, cache_dir) / "snapshots"
     if not snapshots.is_dir():
         return False
     return any(
@@ -74,6 +80,26 @@ def _model_is_cached(repo_id: str) -> bool:
         for snapshot in snapshots.iterdir()
         if snapshot.is_dir()
     )
+
+
+def _cached_model_locations(repo_id: str) -> list[str]:
+    user_directory = _user_model_cache_directory()
+    local_directory = get_model_directory()
+    locations = []
+    if _model_is_cached(repo_id, user_directory):
+        locations.append("User home")
+    if local_directory != user_directory and _model_is_cached(
+        repo_id, local_directory
+    ):
+        locations.append("Local data")
+    return locations
+
+
+def _preferred_model_cache_directory(repo_id: str) -> Path | None:
+    local_directory = get_model_directory()
+    if _model_is_cached(repo_id, local_directory):
+        return local_directory
+    return None
 
 
 def _configure_huggingface_proxy(proxy: str | None) -> None:
@@ -95,17 +121,23 @@ class _ModelDownloadWorker(QObject):
     completed = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, repo_id: str, proxy: str | None) -> None:
+    def __init__(
+        self,
+        repo_id: str,
+        proxy: str | None,
+        cache_dir: Path | None = None,
+    ) -> None:
         super().__init__()
         self.repo_id = repo_id
         self.proxy = proxy
+        self.cache_dir = cache_dir
 
     def run(self) -> None:
         try:
             from huggingface_hub import snapshot_download
 
             _configure_huggingface_proxy(self.proxy)
-            snapshot_download(repo_id=self.repo_id)
+            snapshot_download(repo_id=self.repo_id, cache_dir=self.cache_dir)
         except Exception as exc:
             self.failed.emit(str(exc))
             return
@@ -121,8 +153,23 @@ class ModelManagementDialog(QDialog):
         self.setWindowTitle("AI Tagging Models")
         self.resize(680, 360)
 
+        self.download_location_input = QComboBox()
+        self.download_location_input.addItem("User home directory", "user")
+        self.download_location_input.addItem("Local data directory", "local")
+        self.download_location_input.currentIndexChanged.connect(
+            self._download_location_changed
+        )
+        self.download_location_path_label = QLabel()
+        self.download_location_path_label.setWordWrap(True)
+        self.download_location_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        destination_layout = QFormLayout()
+        destination_layout.addRow("Download location", self.download_location_input)
+        destination_layout.addRow("Directory", self.download_location_path_label)
+
         self.models = QTreeWidget()
-        self.models.setHeaderLabels(["Model", "Repository", "Status"])
+        self.models.setHeaderLabels(["Model", "Repository", "Status", "Location"])
         self.models.setRootIsDecorated(False)
         self.models.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
         self.models.itemSelectionChanged.connect(self._update_buttons)
@@ -138,20 +185,25 @@ class ModelManagementDialog(QDialog):
         buttons.addWidget(self.close_button)
         buttons.addWidget(self.download_button)
         layout = QVBoxLayout(self)
+        layout.addLayout(destination_layout)
         layout.addWidget(self.models, 1)
         layout.addWidget(self.status_label)
         layout.addLayout(buttons)
+        self._download_location_changed()
         self._refresh_models()
 
     def _refresh_models(self) -> None:
         self.models.clear()
         for name, repo_id in MODEL_REPOSITORIES.items():
-            status = "Available" if _model_is_cached(repo_id) else "Not downloaded"
-            item = QTreeWidgetItem([name, repo_id, status])
+            locations = _cached_model_locations(repo_id)
+            status = "Available" if locations else "Not downloaded"
+            item = QTreeWidgetItem([name, repo_id, status, ", ".join(locations)])
             item.setData(0, Qt.ItemDataRole.UserRole, repo_id)
             self.models.addTopLevelItem(item)
         self.models.resizeColumnToContents(0)
         self.models.resizeColumnToContents(1)
+        self.models.resizeColumnToContents(2)
+        self.models.resizeColumnToContents(3)
         if self.models.topLevelItemCount():
             first_item = self.models.topLevelItem(0)
             if first_item is not None:
@@ -166,6 +218,18 @@ class ModelManagementDialog(QDialog):
         self.download_button.setEnabled(
             self._thread is None and self._selected_repo() is not None
         )
+        self.download_location_input.setEnabled(self._thread is None)
+
+    def _selected_download_cache_directory(self) -> Path | None:
+        if self.download_location_input.currentData() == "local":
+            return get_model_directory()
+        return None
+
+    def _download_location_changed(self, _index: int = -1) -> None:
+        directory = self._selected_download_cache_directory()
+        if directory is None:
+            directory = _user_model_cache_directory()
+        self.download_location_path_label.setText(str(directory))
 
     def _download_selected(self) -> None:
         repo_id = self._selected_repo()
@@ -174,7 +238,11 @@ class ModelManagementDialog(QDialog):
         self.status_label.setText(f"Downloading {repo_id}...")
         self.close_button.setEnabled(False)
         thread = QThread(self)
-        worker = _ModelDownloadWorker(repo_id, self.proxy)
+        worker = _ModelDownloadWorker(
+            repo_id,
+            self.proxy,
+            self._selected_download_cache_directory(),
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._download_completed)
@@ -223,6 +291,7 @@ class _InferenceWorker(QObject):
         general_threshold: float,
         character_threshold: float,
         proxy: str | None,
+        cache_dir: Path | None = None,
     ) -> None:
         super().__init__()
         self.image_paths = image_paths
@@ -230,6 +299,7 @@ class _InferenceWorker(QObject):
         self.general_threshold = general_threshold
         self.character_threshold = character_threshold
         self.proxy = proxy
+        self.cache_dir = cache_dir
 
     def run(self) -> None:
         try:
@@ -249,14 +319,20 @@ class _InferenceWorker(QObject):
 
         _configure_huggingface_proxy(self.proxy)
         self.progress.emit(0, len(self.image_paths), "Loading model...")
-        model = timm.create_model(f"hf-hub:{self.repo_id}").eval()
-        state_dict = timm.models.load_state_dict_from_hf(self.repo_id)
+        model = timm.create_model(
+            f"hf-hub:{self.repo_id}", cache_dir=self.cache_dir
+        ).eval()
+        state_dict = timm.models.load_state_dict_from_hf(
+            self.repo_id, cache_dir=self.cache_dir
+        )
         model.load_state_dict(state_dict)
         transform = create_transform(
             **resolve_data_config(model.pretrained_cfg, model=model)
         )
         labels_path = hf_hub_download(
-            repo_id=self.repo_id, filename="selected_tags.csv"
+            repo_id=self.repo_id,
+            filename="selected_tags.csv",
+            cache_dir=self.cache_dir,
         )
         labels: list[tuple[str, int]] = []
         with open(labels_path, "r", encoding="utf-8", newline="") as stream:
@@ -353,8 +429,19 @@ class AITaggingDialog(QDialog):
         self.image_selection.itemChanged.connect(self._selection_check_changed)
         self.selection_label = QLabel()
         self.model_input = QComboBox()
+        first_available_index = -1
         for name, repo_id in MODEL_REPOSITORIES.items():
             self.model_input.addItem(name, repo_id)
+            index = self.model_input.count() - 1
+            available = bool(_cached_model_locations(repo_id))
+            model = self.model_input.model()
+            if isinstance(model, QStandardItemModel):
+                item = model.item(index)
+                if item is not None:
+                    item.setEnabled(available)
+            if available and first_available_index == -1:
+                first_available_index = index
+        self.model_input.setCurrentIndex(first_available_index)
         self.general_threshold_input = QDoubleSpinBox()
         self.general_threshold_input.setRange(0.0, 1.0)
         self.general_threshold_input.setSingleStep(0.05)
@@ -371,6 +458,7 @@ class AITaggingDialog(QDialog):
         cancel.clicked.connect(self.reject)
         self.start_button = QPushButton("Run Inference")
         self.start_button.clicked.connect(self._start_inference)
+        self.model_input.currentIndexChanged.connect(self._update_start_button)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         buttons.addWidget(cancel)
@@ -597,13 +685,16 @@ class AITaggingDialog(QDialog):
     def _update_start_button(self, *_args) -> None:
         count = len(self._checked_entries())
         self.selection_label.setText(f"{count} image(s) selected.")
-        self.start_button.setEnabled(count > 0)
+        self.start_button.setEnabled(
+            count > 0 and self.model_input.currentIndex() >= 0
+        )
 
     def _start_inference(self) -> None:
         if self._thread is not None:
             return
         entries = self._checked_entries()
-        if not entries:
+        repo_id = self.model_input.currentData()
+        if not entries or not isinstance(repo_id, str):
             return
         self._selected_entries = entries
         self.inference_progress.setRange(0, len(entries))
@@ -612,10 +703,11 @@ class AITaggingDialog(QDialog):
         thread = QThread(self)
         worker = _InferenceWorker(
             [entry.image_path for entry in entries],
-            str(self.model_input.currentData()),
+            repo_id,
             self.general_threshold_input.value(),
             self.character_threshold_input.value(),
             self._proxy,
+            _preferred_model_cache_directory(repo_id),
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)

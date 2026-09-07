@@ -78,7 +78,7 @@ _Tags_ > _AI Tagging_ allows you to tag images with AI models.
 This requires the `ai-tagger` dependency group to be installed. If not, the menu item will be disabled.  
 
 To use AI tagging, select and download models in the settings window.  
-Local models come from the system-wide huggingface cache folder, so you can also download models using hf-cli outside of the app.  
+This app recognizes models from both hf cache folder and local `data/model` folder, so you can also download models using hf-cli outside of the app.  
 
 After selecting images and inference parameters the app will start inference. The heavy dependencies used here are imported lazily to speed up startup, so preparation step might take longer.  
 

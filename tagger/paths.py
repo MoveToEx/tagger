@@ -29,6 +29,10 @@ def get_settings_path() -> Path:
     return get_data_directory() / "settings.json"
 
 
+def get_model_directory() -> Path:
+    return get_data_directory() / "model"
+
+
 def ensure_data_directory() -> Path:
     directory = get_data_directory()
     directory.mkdir(parents=True, exist_ok=True)

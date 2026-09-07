@@ -32,6 +32,12 @@ from PySide6.QtWidgets import (
 
 import tagger.main_window as main_window_module
 import tagger.archive as archive_module
+import tagger.ai_tagger as ai_tagger_module
+from tagger.ai_tagger import (
+    AITaggingDialog,
+    MODEL_REPOSITORIES,
+    ModelManagementDialog,
+)
 from tagger.storage import ArchiveResult
 from tagger.bulk_operation import BulkOperationDialog
 from tagger.domain import ImageEntry, TagOperation
@@ -61,6 +67,142 @@ def create_png(path: Path, color: str = "#2f6fed") -> None:
     image = QImage(32, 24, QImage.Format.Format_RGB32)
     image.fill(QColor(color))
     assert image.save(str(path))
+
+
+def create_cached_model(cache_directory: Path, repo_id: str) -> None:
+    snapshot = (
+        cache_directory
+        / f"models--{repo_id.replace('/', '--')}"
+        / "snapshots"
+        / "revision"
+    )
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").touch()
+    (snapshot / "selected_tags.csv").touch()
+
+
+def test_model_settings_support_local_downloads_and_report_locations(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    repositories = list(MODEL_REPOSITORIES.values())
+    user_cache = tmp_path / "user-cache"
+    local_cache = tmp_path / "data" / "model"
+    create_cached_model(user_cache, repositories[0])
+    create_cached_model(local_cache, repositories[1])
+    create_cached_model(user_cache, repositories[2])
+    create_cached_model(local_cache, repositories[2])
+    monkeypatch.setattr(
+        ai_tagger_module,
+        "_user_model_cache_directory",
+        lambda: user_cache,
+    )
+
+    dialog = ModelManagementDialog()
+    qtbot.addWidget(dialog)
+
+    header = dialog.models.headerItem()
+    assert header is not None
+    assert [header.text(column) for column in range(4)] == [
+        "Model",
+        "Repository",
+        "Status",
+        "Location",
+    ]
+    rows = [
+        dialog.models.topLevelItem(index)
+        for index in range(dialog.models.topLevelItemCount())
+    ]
+    assert [item.text(2) for item in rows if item is not None] == [
+        "Available",
+        "Available",
+        "Available",
+        "Not downloaded",
+    ]
+    assert [item.text(3) for item in rows if item is not None] == [
+        "User home",
+        "Local data",
+        "User home, Local data",
+        "",
+    ]
+    assert dialog.download_location_input.currentText() == "User home directory"
+    assert dialog.download_location_path_label.text() == str(user_cache)
+
+    dialog.download_location_input.setCurrentIndex(1)
+
+    assert dialog.download_location_input.currentText() == "Local data directory"
+    assert dialog.download_location_path_label.text() == str(local_cache)
+    assert dialog._selected_download_cache_directory() == local_cache
+    assert ai_tagger_module._preferred_model_cache_directory(
+        repositories[1]
+    ) == local_cache
+
+
+def test_model_download_worker_uses_selected_cache_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    destination = tmp_path / "data" / "model"
+    calls: list[tuple[str, Path | None]] = []
+    monkeypatch.setattr(
+        ai_tagger_module,
+        "_configure_huggingface_proxy",
+        lambda _proxy: None,
+    )
+
+    import huggingface_hub
+
+    monkeypatch.setattr(
+        huggingface_hub,
+        "snapshot_download",
+        lambda *, repo_id, cache_dir: calls.append((repo_id, cache_dir)),
+    )
+    repo_id = next(iter(MODEL_REPOSITORIES.values()))
+    worker = ai_tagger_module._ModelDownloadWorker(repo_id, "", destination)
+    completed: list[str] = []
+    worker.completed.connect(completed.append)
+
+    worker.run()
+
+    assert calls == [(repo_id, destination)]
+    assert completed == [repo_id]
+
+
+def test_ai_tagger_disables_absent_models_in_selector(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    repositories = list(MODEL_REPOSITORIES.values())
+    available_repo = repositories[2]
+    monkeypatch.setattr(
+        ai_tagger_module,
+        "_cached_model_locations",
+        lambda repo_id: ["Local data"] if repo_id == available_repo else [],
+    )
+    entry = ImageEntry(
+        tmp_path / "image.png",
+        tmp_path / "image.txt",
+        source_bytes=b"",
+    )
+
+    dialog = AITaggingDialog([entry], root_directory=tmp_path)
+    qtbot.addWidget(dialog)
+
+    model = dialog.model_input.model()
+    assert [
+        bool(model.flags(model.index(index, 0)) & Qt.ItemFlag.ItemIsEnabled)
+        for index in range(dialog.model_input.count())
+    ] == [False, False, True, False]
+    assert dialog.model_input.currentData() == available_repo
+    assert dialog.start_button.isEnabled()
+
+    monkeypatch.setattr(
+        ai_tagger_module,
+        "_cached_model_locations",
+        lambda _repo_id: [],
+    )
+    empty_dialog = AITaggingDialog([entry], root_directory=tmp_path)
+    qtbot.addWidget(empty_dialog)
+
+    assert empty_dialog.model_input.currentIndex() == -1
+    assert not empty_dialog.start_button.isEnabled()
 
 
 def test_settings_changes_only_take_effect_when_applied(
