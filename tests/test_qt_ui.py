@@ -52,6 +52,7 @@ from tagger.tag_library import (
     DownloadTagsDialog,
     TagLibrary,
     attach_tag_completer,
+    write_tag_library,
 )
 from tagger.traversal import TraversalDialog
 
@@ -70,10 +71,8 @@ def test_settings_changes_only_take_effect_when_applied(
     settings.setValue(UNDERSCORES_SETTING, False)
     settings.setValue(PARENTHESES_SETTING, False)
     settings.sync()
-    library_path = tmp_path / "tags.csv"
-    library_path.write_text(
-        "name,post_count\nred_hair_(long),100\n", encoding="utf-8"
-    )
+    library_path = tmp_path / "tags.bin"
+    write_tag_library(library_path, [("red_hair_(long)", 100)])
     tag_library = TagLibrary(library_path)
     dialog = SettingsDialog(settings=settings, tag_library=tag_library)
     qtbot.addWidget(dialog)
@@ -108,11 +107,8 @@ def test_settings_changes_only_take_effect_when_applied(
 
 
 def test_tag_autocomplete_double_click_inserts_tag(qtbot, tmp_path: Path) -> None:
-    library_path = tmp_path / "tags.csv"
-    library_path.write_text(
-        "name,post_count\nred_hair,100\nblue_eyes,80\n",
-        encoding="utf-8",
-    )
+    library_path = tmp_path / "tags.bin"
+    write_tag_library(library_path, [("red_hair", 100), ("blue_eyes", 80)])
     library = TagLibrary(library_path)
     host = QWidget()
     line_edit = QLineEdit(host)
@@ -141,11 +137,8 @@ def test_tag_autocomplete_double_click_inserts_tag(qtbot, tmp_path: Path) -> Non
 def test_tag_autocomplete_single_click_keeps_popup_visible(
     qtbot, tmp_path: Path
 ) -> None:
-    library_path = tmp_path / "tags.csv"
-    library_path.write_text(
-        "name,post_count\nred_hair,100\nblue_eyes,80\n",
-        encoding="utf-8",
-    )
+    library_path = tmp_path / "tags.bin"
+    write_tag_library(library_path, [("red_hair", 100), ("blue_eyes", 80)])
     library = TagLibrary(library_path)
     host = QWidget()
     line_edit = QLineEdit(host)
@@ -202,11 +195,8 @@ def test_settings_ok_applies_and_cancel_discards(qtbot, tmp_path: Path) -> None:
 def test_tag_library_settings_separate_transformations_and_downloads(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
-    library_path = tmp_path / "tags.csv"
-    library_path.write_text(
-        "name,post_count\nred_hair,100\nblue_eyes,80\n",
-        encoding="utf-8",
-    )
+    library_path = tmp_path / "tags.bin"
+    write_tag_library(library_path, [("red_hair", 100), ("blue_eyes", 80)])
     tag_library = TagLibrary(library_path)
     dialog = SettingsDialog(
         settings=JsonSettings(tmp_path / "settings.json"),
@@ -478,10 +468,8 @@ def test_main_window_uses_saved_tag_transformations_before_settings_open(
     settings.setValue(UNDERSCORES_SETTING, True)
     settings.setValue(PARENTHESES_SETTING, True)
     settings.sync()
-    library_path = tmp_path / "tags.csv"
-    library_path.write_text(
-        "name,post_count\nred_hair_(long),100\n", encoding="utf-8"
-    )
+    library_path = tmp_path / "tags.bin"
+    write_tag_library(library_path, [("red_hair_(long)", 100)])
 
     def create_library(*, parent=None, **options):
         return TagLibrary(library_path, parent=parent, **options)
@@ -967,9 +955,8 @@ def test_toolbar_tag_search_enter_accepts_active_completion(
 ) -> None:
     create_png(tmp_path / "sample.png")
     (tmp_path / "sample.txt").write_text("dog\n", encoding="utf-8")
-    library_path = tmp_path / "data" / "danbooru_tags.csv"
-    library_path.parent.mkdir()
-    library_path.write_text("name,post_count\nred,100\n", encoding="utf-8")
+    library_path = tmp_path / "data" / "tag-lib" / "danbooru_tags.bin"
+    write_tag_library(library_path, [("red", 100)])
 
     window = MainWindow()
     qtbot.addWidget(window)

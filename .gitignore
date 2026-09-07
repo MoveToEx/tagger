@@ -18,5 +18,4 @@ htmlcov/
 pytest-cache-files-*/
 
 # Local data
-data/danbooru_tags.csv
-data/settings.json
+data/

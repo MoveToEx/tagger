@@ -17,12 +17,12 @@ def get_data_directory() -> Path:
 
 
 DATA_DIRECTORY = get_data_directory()
-TAG_LIBRARY_PATH = DATA_DIRECTORY / "danbooru_tags.csv"
+TAG_LIBRARY_PATH = DATA_DIRECTORY / "tag-lib" / "danbooru_tags.bin"
 SETTINGS_PATH = DATA_DIRECTORY / "settings.json"
 
 
 def get_tag_library_path() -> Path:
-    return get_data_directory() / "danbooru_tags.csv"
+    return get_data_directory() / "tag-lib" / "danbooru_tags.bin"
 
 
 def get_settings_path() -> Path:

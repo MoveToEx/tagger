@@ -20,8 +20,10 @@ def test_environment_data_directory_is_used_by_app_defaults(
 
     assert get_data_directory() == data_directory
     assert get_settings_path() == data_directory / "settings.json"
-    assert get_tag_library_path() == data_directory / "danbooru_tags.csv"
+    assert get_tag_library_path() == (
+        data_directory / "tag-lib" / "danbooru_tags.bin"
+    )
 
     settings = create_app_settings()
     assert Path(settings.fileName()) == get_settings_path()
-    assert TagLibrary().csv_path == get_tag_library_path()
+    assert TagLibrary().library_path == get_tag_library_path()

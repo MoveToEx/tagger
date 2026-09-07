@@ -208,7 +208,7 @@ class SettingsDialog(QDialog):
         self.settings = settings or create_app_settings()
         self.tag_library = tag_library
         self.tag_library_path = (
-            tag_library.csv_path
+            tag_library.library_path
             if tag_library is not None
             else get_tag_library_path()
         )

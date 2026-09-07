@@ -37,8 +37,9 @@ After modifying, use `uv lock` to re-lock the dependencies, and use `uv sync --a
 
 Start by opening a directory containing images of supported format (PNG/JPG/WEBP) and tags (should be named `{image_stem}.txt` or `{image_full}.txt`, ignored when conflicting). Supports drag & drop. 
 
-The application stores its settings and downloaded tag library in the `data`
-directory. Set `TAGGER_DATA_DIRECTORY` to use a different data directory.
+The application stores its settings in `data/settings.json` and the downloaded
+binary tag library in `data/tag-lib/danbooru_tags.bin`. Set
+`TAGGER_DATA_DIRECTORY` to use a different data directory.
 
 > [!NOTE]
 > It is assumed that users are training caption-based LoRAs and will randomly shuffle tags during training. Therefore, this app does not keep the tag order and stores tags in a `set[str]`. It might not work well if you're training an order-aware model.
