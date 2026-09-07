@@ -44,15 +44,23 @@ from tagger.domain import ImageEntry, TagOperation
 from tagger.complex_filter import ComplexFilterDialog
 from tagger.main_window import MainWindow
 from tagger.global_search import GlobalTagSearchDialog
-from tagger.preview import ImageView, PreviewLoader
+from tagger.preview import (
+    SCROLL_NAVIGATE,
+    SCROLL_NAVIGATE_AT_END,
+    SCROLL_PAN,
+    ImageView,
+    PreviewLoader,
+)
 from tagger.review import ReviewDialog
 from tagger.settings import (
     JsonSettings,
     PARENTHESES_SETTING,
     PROXY_MODE_SETTING,
     PROXY_SETTING,
+    SCROLLING_BEHAVIOR_SETTING,
     SettingsDialog,
     UNDERSCORES_SETTING,
+    get_scrolling_behavior,
 )
 from tagger.tag_library import (
     DownloadTagsDialog,
@@ -248,6 +256,44 @@ def test_settings_changes_only_take_effect_when_applied(
     assert tag_library.suggestions("red") == [r"red hair \(long\)"]
 
 
+def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = JsonSettings(settings_path)
+    settings.setValue(SCROLLING_BEHAVIOR_SETTING, SCROLL_NAVIGATE_AT_END)
+    settings.sync()
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+    applied: list[str] = []
+    dialog.scrolling_behavior_changed.connect(applied.append)
+
+    assert dialog.pages.currentWidget() is dialog.general_page
+    assert dialog.scrolling_behavior_group.title() == "Scrolling behavior"
+    assert [
+        dialog.scrolling_behavior_input.itemText(index)
+        for index in range(dialog.scrolling_behavior_input.count())
+    ] == ["Navigate", "Pan", "Navigate at end"]
+    assert dialog.scrolling_behavior_input.currentData() == SCROLL_NAVIGATE_AT_END
+
+    dialog.scrolling_behavior_input.setCurrentIndex(
+        dialog.scrolling_behavior_input.findData(SCROLL_NAVIGATE)
+    )
+
+    assert dialog.apply_button.isEnabled()
+    assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE_AT_END
+    dialog.apply_button.click()
+
+    assert not dialog.apply_button.isEnabled()
+    assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE
+    assert get_scrolling_behavior(JsonSettings(settings_path)) == SCROLL_NAVIGATE
+    assert applied == [SCROLL_NAVIGATE]
+
+
+def test_scrolling_behavior_defaults_to_pan(tmp_path: Path) -> None:
+    settings = JsonSettings(tmp_path / "settings.json")
+
+    assert get_scrolling_behavior(settings) == SCROLL_PAN
+
+
 def test_tag_autocomplete_double_click_inserts_tag(qtbot, tmp_path: Path) -> None:
     library_path = tmp_path / "tags.bin"
     write_tag_library(library_path, [("red_hair", 100), ("blue_eyes", 80)])
@@ -406,7 +452,7 @@ def test_settings_tree_stages_proxy_until_applied(qtbot, tmp_path: Path) -> None
     ]
     assert [
         item.text(0) for item in top_level_items if item is not None
-    ] == ["Models", "Autocomplete", "Network"]
+    ] == ["General", "Models", "Autocomplete", "Network"]
     assert dialog.network_item.childCount() == 1
     assert dialog.network_item.child(0).text(0) == "Proxy"
     assert dialog.network_item.isExpanded()
@@ -640,11 +686,14 @@ def test_navigation_actions_stop_at_boundaries(qtbot, tmp_path: Path) -> None:
     assert window.previous_action.isEnabled()
 
 
-def test_mouse_wheel_navigation_action_changes_images(
-    qtbot, tmp_path: Path
+def test_mouse_wheel_navigate_setting_changes_images_and_menu_item_is_removed(
+    qtbot, tmp_path: Path, monkeypatch
 ) -> None:
     create_png(tmp_path / "a.png")
     create_png(tmp_path / "b.png")
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(SCROLLING_BEHAVIOR_SETTING, SCROLL_NAVIGATE)
+    monkeypatch.setattr(main_window_module, "create_app_settings", lambda: settings)
     window = MainWindow()
     qtbot.addWidget(window)
     window._load_directory(tmp_path, show_issues=False)
@@ -656,11 +705,11 @@ def test_mouse_wheel_navigation_action_changes_images(
         for menu in window.menuBar().findChildren(QMenu)
         if menu.title() == "&Navigate"
     )
-    assert window.wheel_navigation_action in navigate_menu.actions()
-    assert window.wheel_navigation_action.isCheckable()
-    assert not window.wheel_navigation_action.isChecked()
-
-    window.wheel_navigation_action.setChecked(True)
+    assert all(
+        action.text() != "Scroll to Navigate"
+        for action in navigate_menu.actions()
+    )
+    assert window.image_view._scrolling_behavior == SCROLL_NAVIGATE
     wheel = QWheelEvent(
         window.image_view.viewport().rect().center(),
         window.image_view.viewport().mapToGlobal(
@@ -687,7 +736,7 @@ def test_ctrl_wheel_zooms_instead_of_navigating(qtbot, tmp_path: Path) -> None:
     window.show()
     qtbot.waitExposed(window)
     qtbot.waitUntil(lambda: window.image_view._pixmap is not None)
-    window.wheel_navigation_action.setChecked(True)
+    window.image_view.set_scrolling_behavior(SCROLL_NAVIGATE)
     initial_zoom = window.image_view._zoom
     wheel = QWheelEvent(
         window.image_view.viewport().rect().center(),
@@ -707,6 +756,69 @@ def test_ctrl_wheel_zooms_instead_of_navigating(qtbot, tmp_path: Path) -> None:
     assert window.image_list.currentIndex().row() == 0
     assert not window.fit_action.isChecked()
     assert window.image_view._zoom > initial_zoom
+
+
+def test_navigate_at_end_scrolls_until_directional_boundary_then_navigates(
+    qtbot,
+) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    image = QImage(800, 1200, QImage.Format.Format_RGB32)
+    image.fill(QColor("#2f6fed"))
+    view.resize(400, 300)
+    view.set_fit_to_window(False)
+    view.set_image(image)
+    view.set_scrolling_behavior(SCROLL_NAVIGATE_AT_END)
+    view.show()
+    qtbot.waitExposed(view)
+    navigation: list[int] = []
+    view.navigation_requested.connect(navigation.append)
+    scrollbar = view.verticalScrollBar()
+    assert scrollbar.maximum() > scrollbar.minimum()
+    scrollbar.setValue(scrollbar.maximum() // 2)
+    initial_value = scrollbar.value()
+
+    pan_event = QWheelEvent(
+        view.viewport().rect().center(),
+        view.viewport().mapToGlobal(view.viewport().rect().center()),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QGuiApplication.sendEvent(view.viewport(), pan_event)
+
+    assert scrollbar.value() > initial_value
+    assert navigation == []
+
+    scrollbar.setValue(scrollbar.maximum())
+    next_event = QWheelEvent(
+        view.viewport().rect().center(),
+        view.viewport().mapToGlobal(view.viewport().rect().center()),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QGuiApplication.sendEvent(view.viewport(), next_event)
+    scrollbar.setValue(scrollbar.minimum())
+    previous_event = QWheelEvent(
+        view.viewport().rect().center(),
+        view.viewport().mapToGlobal(view.viewport().rect().center()),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QGuiApplication.sendEvent(view.viewport(), previous_event)
+
+    assert navigation == [1, -1]
 
 
 def test_archive_action_compresses_open_folder_without_hierarchy(

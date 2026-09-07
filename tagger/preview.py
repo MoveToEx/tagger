@@ -26,6 +26,16 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QLabel, QScrollArea
 
 
+SCROLL_NAVIGATE = "navigate"
+SCROLL_PAN = "pan"
+SCROLL_NAVIGATE_AT_END = "navigate_at_end"
+SCROLLING_BEHAVIORS = {
+    SCROLL_NAVIGATE,
+    SCROLL_PAN,
+    SCROLL_NAVIGATE_AT_END,
+}
+
+
 class _PreviewSignals(QObject):
     finished = Signal(int, QImage, str)
 
@@ -122,7 +132,7 @@ class ImageView(QScrollArea):
 
         self._pixmap: QPixmap | None = None
         self._fit_to_window = True
-        self._wheel_navigation_enabled = False
+        self._scrolling_behavior = SCROLL_PAN
         self._zoom = 1.0
         self._drag_start: QPoint | None = None
         self._drag_scroll_start: tuple[int, int] | None = None
@@ -154,8 +164,10 @@ class ImageView(QScrollArea):
             self._zoom = 1.0
         self._update_pixmap()
 
-    def set_wheel_navigation_enabled(self, enabled: bool) -> None:
-        self._wheel_navigation_enabled = bool(enabled)
+    def set_scrolling_behavior(self, behavior: str) -> None:
+        self._scrolling_behavior = (
+            behavior if behavior in SCROLLING_BEHAVIORS else SCROLL_PAN
+        )
 
     def actual_size(self) -> None:
         self._set_manual_zoom()
@@ -212,15 +224,34 @@ class ImageView(QScrollArea):
         )
 
     def _handle_wheel(self, event: QWheelEvent, position: QPoint) -> bool:
-        delta = event.angleDelta().y() or event.pixelDelta().y()
+        vertical_delta = event.angleDelta().y() or event.pixelDelta().y()
+        horizontal_delta = event.angleDelta().x() or event.pixelDelta().x()
+        use_horizontal = bool(
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ) or abs(horizontal_delta) > abs(vertical_delta)
+        delta = (
+            horizontal_delta or vertical_delta
+            if use_horizontal
+            else vertical_delta or horizontal_delta
+        )
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if delta != 0:
                 self._zoom_at(position, 1.25 if delta > 0 else 0.8)
             event.accept()
             return True
 
-        if not self._wheel_navigation_enabled or delta == 0:
+        if self._scrolling_behavior == SCROLL_PAN or delta == 0:
             return False
+        if self._scrolling_behavior == SCROLL_NAVIGATE_AT_END:
+            scrollbar = (
+                self.horizontalScrollBar()
+                if use_horizontal
+                else self.verticalScrollBar()
+            )
+            if delta > 0 and scrollbar.value() > scrollbar.minimum():
+                return False
+            if delta < 0 and scrollbar.value() < scrollbar.maximum():
+                return False
         self.navigation_requested.emit(-1 if delta > 0 else 1)
         event.accept()
         return True

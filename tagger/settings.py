@@ -8,11 +8,13 @@ from typing import cast
 
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtCore import QByteArray, Signal, Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -38,6 +40,12 @@ from .paths import (
     get_settings_path,
     get_tag_library_path,
 )
+from .preview import (
+    SCROLL_NAVIGATE,
+    SCROLL_NAVIGATE_AT_END,
+    SCROLL_PAN,
+    SCROLLING_BEHAVIORS,
+)
 from .tag_library import (
     DownloadTagsDialog,
     TagLibrary,
@@ -47,12 +55,20 @@ from .tag_library import (
 
 UNDERSCORES_SETTING = "autocomplete/transform_underscores_to_spaces"
 PARENTHESES_SETTING = "autocomplete/escape_parentheses"
+SCROLLING_BEHAVIOR_SETTING = "general/scrolling_behavior"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 NO_PROXY = "none"
 SYSTEM_PROXY = "system"
 CUSTOM_PROXY = "custom"
 PROXY_MODES = {NO_PROXY, SYSTEM_PROXY, CUSTOM_PROXY}
+
+
+def get_scrolling_behavior(settings: JsonSettings) -> str:
+    behavior = settings.value(SCROLLING_BEHAVIOR_SETTING, None, type=str)
+    if isinstance(behavior, str) and behavior in SCROLLING_BEHAVIORS:
+        return behavior
+    return SCROLL_PAN
 
 
 def _stabilize_checkbox(checkbox: QCheckBox) -> None:
@@ -197,6 +213,8 @@ def create_app_settings() -> JsonSettings:
 
 
 class SettingsDialog(QDialog):
+    scrolling_behavior_changed = Signal(str)
+
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -226,6 +244,7 @@ class SettingsDialog(QDialog):
             self._applied_proxy_mode,
             self._applied_proxy_url,
         ) = _proxy_preferences(self.settings)
+        self._applied_scrolling_behavior = get_scrolling_behavior(self.settings)
         self.setWindowTitle("Settings")
         self.resize(760, 520)
 
@@ -241,14 +260,19 @@ class SettingsDialog(QDialog):
         self.navigation_list = self.navigation_tree
         self.stacked_widget = self.pages
 
+        self.general_page = self._create_general_page()
         self.models_page = self._create_models_page()
         self.tag_library_dialog: DownloadTagsDialog | None = None
         self.autocomplete_page = self._create_autocomplete_page()
         self.proxy_page = self._create_proxy_page()
+        self.pages.addWidget(self.general_page)
         self.pages.addWidget(self.models_page)
         self.pages.addWidget(self.autocomplete_page)
         self.pages.addWidget(self.proxy_page)
 
+        self.general_item = self._add_navigation_item(
+            "General", self.general_page
+        )
         self.models_item = self._add_navigation_item(
             "Models", self.models_page
         )
@@ -267,7 +291,7 @@ class SettingsDialog(QDialog):
         self.navigation_tree.currentItemChanged.connect(
             self._navigation_changed
         )
-        self.navigation_tree.setCurrentItem(self.models_item)
+        self.navigation_tree.setCurrentItem(self.general_item)
 
         content = QHBoxLayout()
         content.addWidget(self.navigation_tree)
@@ -316,6 +340,30 @@ class SettingsDialog(QDialog):
         page_index = current.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(page_index, int):
             self.pages.setCurrentIndex(page_index)
+
+    def _create_general_page(self) -> QWidget:
+        page = QWidget()
+        self.scrolling_behavior_group = QGroupBox("Scrolling behavior")
+        self.scrolling_behavior_input = QComboBox()
+        self.scrolling_behavior_input.addItem("Navigate", SCROLL_NAVIGATE)
+        self.scrolling_behavior_input.addItem("Pan", SCROLL_PAN)
+        self.scrolling_behavior_input.addItem(
+            "Navigate at end", SCROLL_NAVIGATE_AT_END
+        )
+        selected_index = self.scrolling_behavior_input.findData(
+            self._applied_scrolling_behavior
+        )
+        self.scrolling_behavior_input.setCurrentIndex(selected_index)
+
+        group_layout = QFormLayout(self.scrolling_behavior_group)
+        group_layout.addRow("Mouse wheel", self.scrolling_behavior_input)
+        page_layout = QVBoxLayout(page)
+        page_layout.addWidget(self.scrolling_behavior_group)
+        page_layout.addStretch(1)
+        self.scrolling_behavior_input.currentIndexChanged.connect(
+            self._settings_changed
+        )
+        return page
 
     def _create_models_page(self) -> QWidget:
         if not ai_dependencies_available():
@@ -519,7 +567,8 @@ class SettingsDialog(QDialog):
 
     def _settings_changed(self, *_args: object) -> None:
         self.apply_button.setEnabled(
-            self._transform_options() != self._applied_transform_options
+            self._scrolling_behavior() != self._applied_scrolling_behavior
+            or self._transform_options() != self._applied_transform_options
             or self._proxy_preferences()
             != (self._applied_proxy_mode, self._applied_proxy_url)
         )
@@ -529,6 +578,10 @@ class SettingsDialog(QDialog):
             self.underscores_checkbox.isChecked(),
             self.parentheses_checkbox.isChecked(),
         )
+
+    def _scrolling_behavior(self) -> str:
+        behavior = self.scrolling_behavior_input.currentData()
+        return behavior if isinstance(behavior, str) else SCROLL_PAN
 
     def _proxy_preferences(self) -> tuple[str, str]:
         if self.system_proxy_radio.isChecked():
@@ -540,10 +593,12 @@ class SettingsDialog(QDialog):
         return mode, self.proxy_input.text().strip()
 
     def _apply(self) -> None:
+        scrolling_behavior = self._scrolling_behavior()
         underscores = self.underscores_checkbox.isChecked()
         parentheses = self.parentheses_checkbox.isChecked()
         proxy_mode, proxy_url = self._proxy_preferences()
         proxy = _resolved_proxy(proxy_mode, proxy_url)
+        self.settings.setValue(SCROLLING_BEHAVIOR_SETTING, scrolling_behavior)
         self.settings.setValue(UNDERSCORES_SETTING, underscores)
         self.settings.setValue(PARENTHESES_SETTING, parentheses)
         self.settings.setValue(PROXY_MODE_SETTING, proxy_mode)
@@ -558,6 +613,8 @@ class SettingsDialog(QDialog):
             self.tag_library_dialog.set_proxy(proxy)
         if isinstance(self.models_page, ModelManagementDialog):
             self.models_page.set_proxy(proxy)
+        self.scrolling_behavior_changed.emit(scrolling_behavior)
+        self._applied_scrolling_behavior = scrolling_behavior
         self._applied_transform_options = (underscores, parentheses)
         self._applied_proxy_mode = proxy_mode
         self._applied_proxy_url = proxy_url
