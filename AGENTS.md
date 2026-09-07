@@ -16,7 +16,7 @@ uv sync                  # install the default environment
 uv sync --all-groups     # also install optional AI-tagging dependencies
 uv run python .\main.py # launch the desktop app
 .\.venv\Scripts\python.exe -m pytest # run the complete test suite
-uv run ty check          # run the repository's type checker
+.\.venv\Scripts\ty.exe check       # run the repository's type checker
 ```
 
 When changing dependency constraints or the PyTorch index, run `uv lock` and sync again.
