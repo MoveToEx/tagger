@@ -53,6 +53,7 @@ from tagger.preview import (
     SCROLL_NAVIGATE,
     SCROLL_NAVIGATE_AT_END,
     SCROLL_PAN,
+    SCROLL_ZOOM,
     ImageView,
     PreviewLoader,
 )
@@ -336,7 +337,7 @@ def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> No
     assert [
         dialog.scrolling_behavior_input.itemText(index)
         for index in range(dialog.scrolling_behavior_input.count())
-    ] == ["Navigate", "Pan", "Navigate at end"]
+    ] == ["Navigate", "Pan", "Pan, Navigate at end", "Zoom"]
     assert dialog.scrolling_behavior_input.currentData() == SCROLL_NAVIGATE_AT_END
 
     dialog.scrolling_behavior_input.setCurrentIndex(
@@ -870,7 +871,9 @@ def test_mouse_wheel_navigate_setting_changes_images_and_menu_item_is_removed(
     assert window.image_list.currentIndex().row() == 1
 
 
-def test_ctrl_wheel_zooms_instead_of_navigating(qtbot, tmp_path: Path) -> None:
+def test_zoom_scroll_behavior_zooms_instead_of_navigating(
+    qtbot, tmp_path: Path
+) -> None:
     create_png(tmp_path / "a.png")
     create_png(tmp_path / "b.png")
     window = MainWindow()
@@ -879,7 +882,7 @@ def test_ctrl_wheel_zooms_instead_of_navigating(qtbot, tmp_path: Path) -> None:
     window.show()
     qtbot.waitExposed(window)
     qtbot.waitUntil(lambda: window.image_view._pixmap is not None)
-    window.image_view.set_scrolling_behavior(SCROLL_NAVIGATE)
+    window.image_view.set_scrolling_behavior(SCROLL_ZOOM)
     initial_zoom = window.image_view._zoom
     wheel = QWheelEvent(
         window.image_view.viewport().rect().center(),
@@ -889,7 +892,7 @@ def test_ctrl_wheel_zooms_instead_of_navigating(qtbot, tmp_path: Path) -> None:
         QPoint(0, 0),
         QPoint(0, 120),
         Qt.MouseButton.NoButton,
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.NoModifier,
         Qt.ScrollPhase.ScrollUpdate,
         False,
     )
@@ -899,6 +902,34 @@ def test_ctrl_wheel_zooms_instead_of_navigating(qtbot, tmp_path: Path) -> None:
     assert window.image_list.currentIndex().row() == 0
     assert not window.fit_action.isChecked()
     assert window.image_view._zoom > initial_zoom
+
+
+def test_ctrl_wheel_keeps_zoom_override(qtbot) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    image = QImage(800, 600, QImage.Format.Format_RGB32)
+    image.fill(QColor("#2f6fed"))
+    view.resize(400, 300)
+    view.set_image(image)
+    view.set_scrolling_behavior(SCROLL_PAN)
+    view.show()
+    qtbot.waitExposed(view)
+    initial_zoom = view._zoom
+    wheel = QWheelEvent(
+        view.viewport().rect().center(),
+        view.viewport().mapToGlobal(view.viewport().rect().center()),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.ControlModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+
+    QGuiApplication.sendEvent(view.viewport(), wheel)
+
+    assert view._zoom > initial_zoom
+    assert not view.fit_to_window
 
 
 def test_navigate_at_end_scrolls_until_directional_boundary_then_navigates(
@@ -1259,7 +1290,7 @@ def test_close_folder_empties_program_state(qtbot, tmp_path: Path) -> None:
     assert not window.bulk_operation_action.isEnabled()
 
 
-def test_image_view_ctrl_wheel_zoom_and_drag_pan(qtbot) -> None:
+def test_image_view_zoom_scroll_and_drag_pan(qtbot) -> None:
     view = ImageView()
     qtbot.addWidget(view)
     image = QImage(800, 600, QImage.Format.Format_RGB32)
@@ -1277,10 +1308,11 @@ def test_image_view_ctrl_wheel_zoom_and_drag_pan(qtbot) -> None:
         QPoint(0, 0),
         QPoint(0, 120),
         Qt.MouseButton.NoButton,
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.NoModifier,
         Qt.ScrollPhase.ScrollUpdate,
         False,
     )
+    view.set_scrolling_behavior(SCROLL_ZOOM)
     QGuiApplication.sendEvent(view.viewport(), wheel)
 
     assert not view.fit_to_window

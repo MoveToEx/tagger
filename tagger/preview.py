@@ -29,10 +29,12 @@ from PySide6.QtWidgets import QLabel, QScrollArea
 SCROLL_NAVIGATE = "navigate"
 SCROLL_PAN = "pan"
 SCROLL_NAVIGATE_AT_END = "navigate_at_end"
+SCROLL_ZOOM = "zoom"
 SCROLLING_BEHAVIORS = {
     SCROLL_NAVIGATE,
     SCROLL_PAN,
     SCROLL_NAVIGATE_AT_END,
+    SCROLL_ZOOM,
 }
 
 
@@ -234,7 +236,10 @@ class ImageView(QScrollArea):
             if use_horizontal
             else vertical_delta or horizontal_delta
         )
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        if (
+            self._scrolling_behavior == SCROLL_ZOOM
+            or event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
             if delta != 0:
                 self._zoom_at(position, 1.25 if delta > 0 else 0.8)
             event.accept()

@@ -44,6 +44,7 @@ from .preview import (
     SCROLL_NAVIGATE,
     SCROLL_NAVIGATE_AT_END,
     SCROLL_PAN,
+    SCROLL_ZOOM,
     SCROLLING_BEHAVIORS,
 )
 from .tag_library import (
@@ -349,8 +350,9 @@ class SettingsDialog(QDialog):
         self.scrolling_behavior_input.addItem("Navigate", SCROLL_NAVIGATE)
         self.scrolling_behavior_input.addItem("Pan", SCROLL_PAN)
         self.scrolling_behavior_input.addItem(
-            "Navigate at end", SCROLL_NAVIGATE_AT_END
+            "Pan, Navigate at end", SCROLL_NAVIGATE_AT_END
         )
+        self.scrolling_behavior_input.addItem("Zoom", SCROLL_ZOOM)
         stabilize_widget_size(self.scrolling_behavior_input)
         selected_index = self.scrolling_behavior_input.findData(
             self._applied_scrolling_behavior
