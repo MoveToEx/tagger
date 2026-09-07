@@ -510,6 +510,75 @@ def test_navigation_actions_stop_at_boundaries(qtbot, tmp_path: Path) -> None:
     assert window.previous_action.isEnabled()
 
 
+def test_mouse_wheel_navigation_action_changes_images(
+    qtbot, tmp_path: Path
+) -> None:
+    create_png(tmp_path / "a.png")
+    create_png(tmp_path / "b.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    window.show()
+    qtbot.waitExposed(window)
+
+    navigate_menu = next(
+        menu
+        for menu in window.menuBar().findChildren(QMenu)
+        if menu.title() == "&Navigate"
+    )
+    assert window.wheel_navigation_action in navigate_menu.actions()
+    assert window.wheel_navigation_action.isCheckable()
+    assert not window.wheel_navigation_action.isChecked()
+
+    window.wheel_navigation_action.setChecked(True)
+    wheel = QWheelEvent(
+        window.image_view.viewport().rect().center(),
+        window.image_view.viewport().mapToGlobal(
+            window.image_view.viewport().rect().center()
+        ),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QGuiApplication.sendEvent(window.image_view.viewport(), wheel)
+
+    assert window.image_list.currentIndex().row() == 1
+
+
+def test_ctrl_wheel_zooms_instead_of_navigating(qtbot, tmp_path: Path) -> None:
+    create_png(tmp_path / "a.png")
+    create_png(tmp_path / "b.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    window.show()
+    qtbot.waitExposed(window)
+    qtbot.waitUntil(lambda: window.image_view._pixmap is not None)
+    window.wheel_navigation_action.setChecked(True)
+    initial_zoom = window.image_view._zoom
+    wheel = QWheelEvent(
+        window.image_view.viewport().rect().center(),
+        window.image_view.viewport().mapToGlobal(
+            window.image_view.viewport().rect().center()
+        ),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.ControlModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+
+    QGuiApplication.sendEvent(window.image_view.viewport(), wheel)
+
+    assert window.image_list.currentIndex().row() == 0
+    assert not window.fit_action.isChecked()
+    assert window.image_view._zoom > initial_zoom
+
+
 def test_archive_action_compresses_open_folder_without_hierarchy(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:

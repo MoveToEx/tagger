@@ -70,6 +70,7 @@ class PreviewLoader(QObject):
 
 class ImageView(QScrollArea):
     fit_to_window_changed = Signal(bool)
+    navigation_requested = Signal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -85,6 +86,7 @@ class ImageView(QScrollArea):
 
         self._pixmap: QPixmap | None = None
         self._fit_to_window = True
+        self._wheel_navigation_enabled = False
         self._zoom = 1.0
         self._drag_start: QPoint | None = None
         self._drag_scroll_start: tuple[int, int] | None = None
@@ -115,6 +117,9 @@ class ImageView(QScrollArea):
         if enabled:
             self._zoom = 1.0
         self._update_pixmap()
+
+    def set_wheel_navigation_enabled(self, enabled: bool) -> None:
+        self._wheel_navigation_enabled = bool(enabled)
 
     def actual_size(self) -> None:
         self._set_manual_zoom()
@@ -171,12 +176,16 @@ class ImageView(QScrollArea):
         )
 
     def _handle_wheel(self, event: QWheelEvent, position: QPoint) -> bool:
-        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            return False
         delta = event.angleDelta().y() or event.pixelDelta().y()
-        if delta == 0:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if delta != 0:
+                self._zoom_at(position, 1.25 if delta > 0 else 0.8)
+            event.accept()
             return True
-        self._zoom_at(position, 1.25 if delta > 0 else 0.8)
+
+        if not self._wheel_navigation_enabled or delta == 0:
+            return False
+        self.navigation_requested.emit(-1 if delta > 0 else 1)
         event.accept()
         return True
 

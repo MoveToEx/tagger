@@ -297,6 +297,14 @@ class MainWindow(QMainWindow):
         self.last_action.triggered.connect(
             lambda: self._select_optional_row(self.catalog.last_image_row())
         )
+        self.wheel_navigation_action = QAction(
+            "Scroll to Navigate", self
+        )
+        self.wheel_navigation_action.setCheckable(True)
+        self.wheel_navigation_action.toggled.connect(
+            self.image_view.set_wheel_navigation_enabled
+        )
+        self.image_view.navigation_requested.connect(self._move_selection)
 
         self.folder_tag_actions: dict[TagOperation, QAction] = {}
         labels = {
@@ -354,6 +362,8 @@ class MainWindow(QMainWindow):
                 self.last_action,
             ]
         )
+        navigate_menu.addSeparator()
+        navigate_menu.addAction(self.wheel_navigation_action)
 
         tags_menu = self.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
@@ -1342,11 +1352,20 @@ class MainWindow(QMainWindow):
         fit = cast(bool, self.settings.value("fit_to_window", True, type=bool))
         self.fit_action.setChecked(fit)
         self.image_view.set_fit_to_window(fit)
+        wheel_navigation = cast(
+            bool,
+            self.settings.value("wheel_navigation", False, type=bool),
+        )
+        self.wheel_navigation_action.setChecked(wheel_navigation)
+        self.image_view.set_wheel_navigation_enabled(wheel_navigation)
 
     @override
     def closeEvent(self, event: QCloseEvent) -> None:
         self.settings.setValue("main_geometry", self.saveGeometry())
         self.settings.setValue("splitter_state", self.splitter.saveState())
         self.settings.setValue("fit_to_window", self.fit_action.isChecked())
+        self.settings.setValue(
+            "wheel_navigation", self.wheel_navigation_action.isChecked()
+        )
         self.settings.sync()
         super().closeEvent(event)
