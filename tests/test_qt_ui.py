@@ -9,6 +9,7 @@ from PySide6.QtCore import (
     QMimeData,
     QPoint,
     QPointF,
+    QSize,
     Qt,
     QUrl,
 )
@@ -1326,6 +1327,22 @@ def test_image_view_zoom_scroll_and_drag_pan(qtbot) -> None:
     qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(150, 150))
 
     assert view.horizontalScrollBar().value() > scroll_before_drag
+
+
+def test_image_view_preserves_aspect_ratio_at_small_zoom(qtbot) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    image = QImage(1000, 600, QImage.Format.Format_RGB32)
+    image.fill(QColor("#2f6fed"))
+    view.resize(400, 300)
+    view.set_fit_to_window(False)
+    view.set_image(image)
+    view._zoom = 0.1
+    view._update_pixmap()
+
+    assert view._label.size() == QSize(100, 60)
+    assert view._label.minimumSize() == QSize(0, 0)
+    assert view._label.width() / view._label.height() == 1000 / 600
 
 
 def test_close_folder_allows_another_folder_drop(qtbot, tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QPoint,
+    QRectF,
     QRunnable,
     QSize,
     Qt,
@@ -92,6 +93,7 @@ class _ImageCanvas(QLabel):
 
     def set_source_pixmap(self, pixmap: QPixmap, size: QSize) -> None:
         self._source_pixmap = pixmap
+        self.setMinimumSize(0, 0)
         self.setText("")
         self.resize(size)
         self.update()
@@ -99,6 +101,7 @@ class _ImageCanvas(QLabel):
     @override
     def clear(self) -> None:
         self._source_pixmap = None
+        self.setMinimumSize(240, 180)
         super().clear()
 
     @override
@@ -109,10 +112,23 @@ class _ImageCanvas(QLabel):
         painter = QPainter(self)
         painter.setClipRect(event.rect())
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        source_size = self._source_pixmap.size()
+        scale = min(
+            self.width() / source_size.width(),
+            self.height() / source_size.height(),
+        )
+        draw_width = source_size.width() * scale
+        draw_height = source_size.height() * scale
+        draw_rect = QRectF(
+            (self.width() - draw_width) / 2,
+            (self.height() - draw_height) / 2,
+            draw_width,
+            draw_height,
+        )
         painter.drawPixmap(
-            self.rect(),
+            draw_rect,
             self._source_pixmap,
-            self._source_pixmap.rect(),
+            QRectF(self._source_pixmap.rect()),
         )
 
 
