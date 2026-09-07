@@ -8,6 +8,7 @@ from PySide6.QtCore import (
     QObject,
     QPoint,
     QRunnable,
+    QSize,
     Qt,
     QThreadPool,
     Signal,
@@ -16,6 +17,8 @@ from PySide6.QtGui import (
     QImage,
     QImageReader,
     QMouseEvent,
+    QPainter,
+    QPaintEvent,
     QPixmap,
     QResizeEvent,
     QWheelEvent,
@@ -68,6 +71,39 @@ class PreviewLoader(QObject):
             self.loaded.emit(image, error)
 
 
+class _ImageCanvas(QLabel):
+    """Paint only the exposed portion instead of storing a scaled pixmap."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self._source_pixmap: QPixmap | None = None
+
+    def set_source_pixmap(self, pixmap: QPixmap, size: QSize) -> None:
+        self._source_pixmap = pixmap
+        self.setText("")
+        self.resize(size)
+        self.update()
+
+    @override
+    def clear(self) -> None:
+        self._source_pixmap = None
+        super().clear()
+
+    @override
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        if self._source_pixmap is None or self.width() <= 0 or self.height() <= 0:
+            return
+        painter = QPainter(self)
+        painter.setClipRect(event.rect())
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawPixmap(
+            self.rect(),
+            self._source_pixmap,
+            self._source_pixmap.rect(),
+        )
+
+
 class ImageView(QScrollArea):
     fit_to_window_changed = Signal(bool)
     navigation_requested = Signal(int)
@@ -78,7 +114,7 @@ class ImageView(QScrollArea):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
 
-        self._label = QLabel("Open a folder to begin")
+        self._label = _ImageCanvas("Open a folder to begin")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setMinimumSize(240, 180)
         self._label.setStyleSheet("QLabel { color: #667085; background: #f2f4f7; }")
@@ -275,17 +311,10 @@ class ImageView(QScrollArea):
             return
         if self._fit_to_window:
             target = self.viewport().size()
-            pixmap = self._pixmap.scaled(
+            size = self._pixmap.size().scaled(
                 target,
                 Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
             )
         else:
             size = self._pixmap.size() * self._zoom
-            pixmap = self._pixmap.scaled(
-                size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        self._label.setPixmap(pixmap)
-        self._label.resize(pixmap.size())
+        self._label.set_source_pixmap(self._pixmap, size)

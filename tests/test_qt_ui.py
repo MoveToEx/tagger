@@ -1030,6 +1030,8 @@ def test_image_view_ctrl_wheel_zoom_and_drag_pan(qtbot) -> None:
 
     assert not view.fit_to_window
     assert view._label.width() > initial_size.width()
+    assert view._label.pixmap().isNull()
+    assert view._label._source_pixmap is view._pixmap
     scroll_before_drag = view.horizontalScrollBar().value()
 
     qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(200, 150))
