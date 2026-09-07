@@ -89,6 +89,10 @@ from .tag_library import (
 from .traversal import TraversalDialog
 
 
+RECENT_FOLDERS_SETTING = "recent_folders"
+MAX_RECENT_FOLDERS = 10
+
+
 def move_to_trash(path: Path) -> bool:
     trash_file = QFile(str(path))
     move = cast(Callable[[], bool], trash_file.moveToTrash)
@@ -235,9 +239,6 @@ class MainWindow(QMainWindow):
         self.open_action.setShortcut(QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.open_folder)
 
-        self.open_recent_action = QAction("Open Recent Folder", self)
-        self.open_recent_action.triggered.connect(self.open_recent_folder)
-
         self.close_folder_action = QAction("Close Folder", self)
         self.close_folder_action.setShortcut(QKeySequence.StandardKey.Close)
         self.close_folder_action.triggered.connect(self.close_folder)
@@ -337,7 +338,12 @@ class MainWindow(QMainWindow):
     def _create_menus_and_toolbar(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
         file_menu.addAction(self.open_action)
-        file_menu.addAction(self.open_recent_action)
+        self.open_recent_menu = file_menu.addMenu("Open Recent")
+        self.open_recent_action = self.open_recent_menu.menuAction()
+        self.open_recent_menu.aboutToShow.connect(
+            self._update_recent_folder_menu
+        )
+        self._update_recent_folder_menu()
         file_menu.addAction(self.close_folder_action)
         file_menu.addAction(self.rescan_action)
         file_menu.addSeparator()
@@ -405,30 +411,50 @@ class MainWindow(QMainWindow):
         if selected:
             self._load_directory(Path(selected), show_issues=True)
 
-    def open_recent_folder(self) -> None:
-        if self.directory is not None:
+    def open_recent_folder(self, directory: Path) -> None:
+        if not directory.is_dir():
+            self._update_recent_folder_menu()
             return
-        recent = self._recent_folder()
-        if recent is None:
-            self._update_recent_folder_action()
-            return
-        self._load_directory(recent, show_issues=True)
-        self._update_recent_folder_action()
+        self._load_directory(directory, show_issues=True)
 
-    def _recent_folder(self) -> Path | None:
-        value = self.settings.value("last_directory", "", type=str)
-        if not isinstance(value, str) or not value.strip():
-            return None
-        path = Path(value.strip()).expanduser()
-        return path if path.is_dir() else None
+    def _recent_folders(self) -> list[Path]:
+        value = self.settings.value(RECENT_FOLDERS_SETTING, [])
+        if not isinstance(value, list):
+            return []
+        folders: list[Path] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            folder = Path(item).expanduser()
+            if folder.is_dir() and folder not in folders:
+                folders.append(folder)
+        return folders[:MAX_RECENT_FOLDERS]
 
-    def _update_recent_folder_action(self) -> None:
-        recent = self._recent_folder()
-        startup = self.directory is None
-        self.open_recent_action.setEnabled(startup and recent is not None)
+    def _record_recent_folder(self, directory: Path) -> None:
+        folders = [
+            folder for folder in self._recent_folders() if folder != directory
+        ]
+        folders.insert(0, directory)
+        self.settings.setValue(
+            RECENT_FOLDERS_SETTING,
+            [str(folder) for folder in folders[:MAX_RECENT_FOLDERS]],
+        )
+        self.settings.setValue("last_directory", str(directory))
+        self.open_recent_action.setEnabled(True)
+
+    def _update_recent_folder_menu(self) -> None:
+        folders = self._recent_folders()
+        self.open_recent_menu.clear()
+        for folder in folders:
+            action = self.open_recent_menu.addAction(str(folder))
+            action.setToolTip(str(folder))
+            action.triggered.connect(
+                lambda _checked=False, path=folder: self.open_recent_folder(path)
+            )
+        self.open_recent_action.setEnabled(bool(folders))
         self.open_recent_action.setToolTip(
-            str(recent)
-            if recent is not None
+            "Open a recently used folder."
+            if folders
             else "No recently opened folder is available."
         )
 
@@ -556,7 +582,7 @@ class MainWindow(QMainWindow):
 
         self.directory = directory
         self._update_window_title()
-        self.settings.setValue("last_directory", str(directory))
+        self._record_recent_folder(directory)
         self.catalog.set_entries(result.entries, directory)
         self.tag_library.set_folder_entries(result.entries)
         self.image_list.expandAll()
@@ -1333,8 +1359,6 @@ class MainWindow(QMainWindow):
             self.zoom_out_action,
         ]:
             action.setEnabled(has_current)
-        self._update_recent_folder_action()
-
     def _restore_settings(self) -> None:
         geometry = self.settings.value("main_geometry")
         if isinstance(geometry, (QByteArray, bytes, bytearray, memoryview)):

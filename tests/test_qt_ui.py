@@ -42,7 +42,7 @@ from tagger.storage import ArchiveResult
 from tagger.bulk_operation import BulkOperationDialog
 from tagger.domain import ImageEntry, TagOperation
 from tagger.complex_filter import ComplexFilterDialog
-from tagger.main_window import MainWindow
+from tagger.main_window import MAX_RECENT_FOLDERS, RECENT_FOLDERS_SETTING, MainWindow
 from tagger.global_search import GlobalTagSearchDialog
 from tagger.preview import (
     SCROLL_NAVIGATE,
@@ -601,9 +601,17 @@ def test_main_window_loads_folder_and_edits_current_tags(qtbot, tmp_path: Path) 
 def test_file_menu_opens_recent_folder(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
-    create_png(tmp_path / "sample.png")
+    current = tmp_path / "current"
+    recent_a = tmp_path / "recent-a"
+    recent_b = tmp_path / "recent-b"
+    for folder in (current, recent_a, recent_b):
+        folder.mkdir()
+        create_png(folder / "sample.png")
     settings = JsonSettings(tmp_path / "settings.json")
-    settings.setValue("last_directory", str(tmp_path))
+    settings.setValue(
+        RECENT_FOLDERS_SETTING,
+        [str(recent_a), str(recent_b)],
+    )
     monkeypatch.setattr(
         main_window_module, "create_app_settings", lambda: settings
     )
@@ -612,9 +620,13 @@ def test_file_menu_opens_recent_folder(
     qtbot.addWidget(window)
 
     assert window.directory is None
-    assert window.open_recent_action.text() == "Open Recent Folder"
+    assert window.open_recent_action.text() == "Open Recent"
     assert window.open_recent_action.isEnabled()
-    assert str(tmp_path) == window.open_recent_action.toolTip()
+    assert window.open_recent_menu.title() == "Open Recent"
+    assert [action.text() for action in window.open_recent_menu.actions()] == [
+        str(recent_a),
+        str(recent_b),
+    ]
     file_menu = next(
         menu
         for menu in window.menuBar().findChildren(QMenu)
@@ -623,18 +635,36 @@ def test_file_menu_opens_recent_folder(
     assert file_menu is not None
     assert window.open_recent_action in file_menu.actions()
 
-    window.open_recent_action.trigger()
+    window._load_directory(current, show_issues=False)
 
-    assert window.directory == tmp_path
-    assert not window.open_recent_action.isEnabled()
+    assert window.directory == current
+    assert window.open_recent_action.isEnabled()
+    window._update_recent_folder_menu()
+    recent_action = next(
+        action
+        for action in window.open_recent_menu.actions()
+        if action.text() == str(recent_b)
+    )
+    recent_action.trigger()
+
+    assert window.directory == recent_b
+    assert window.open_recent_action.isEnabled()
     assert window.catalog.image_count == 1
+    assert settings.value(RECENT_FOLDERS_SETTING) == [
+        str(recent_b),
+        str(current),
+        str(recent_a),
+    ]
 
 
 def test_file_menu_disables_missing_recent_folder(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
     settings = JsonSettings(tmp_path / "settings.json")
-    settings.setValue("last_directory", str(tmp_path / "missing"))
+    settings.setValue(
+        RECENT_FOLDERS_SETTING,
+        [str(tmp_path / "missing")],
+    )
     monkeypatch.setattr(
         main_window_module, "create_app_settings", lambda: settings
     )
@@ -644,9 +674,39 @@ def test_file_menu_disables_missing_recent_folder(
 
     assert window.directory is None
     assert not window.open_recent_action.isEnabled()
+    assert window.open_recent_menu.actions() == []
     assert window.open_recent_action.toolTip() == (
         "No recently opened folder is available."
     )
+
+
+def test_recent_folders_are_deduplicated_and_capped(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    settings = JsonSettings(tmp_path / "settings.json")
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+    folders = [tmp_path / f"folder-{index}" for index in range(12)]
+    for folder in folders:
+        folder.mkdir()
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    for folder in folders:
+        window._record_recent_folder(folder)
+    window._record_recent_folder(folders[-3])
+
+    recent = settings.value(RECENT_FOLDERS_SETTING)
+    assert isinstance(recent, list)
+    assert recent == [
+        str(folders[-3]),
+        *[
+            str(folder)
+            for folder in reversed(folders)
+            if folder != folders[-3]
+        ][: MAX_RECENT_FOLDERS - 1],
+    ]
 
 
 def test_main_window_uses_saved_tag_transformations_before_settings_open(
