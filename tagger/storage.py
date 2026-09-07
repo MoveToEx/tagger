@@ -210,6 +210,60 @@ def scan_folder(directory: Path, supported_extensions: Iterable[str]) -> ScanRes
     return result
 
 
+def rename_image_pair(
+    entry: ImageEntry, new_stem: str
+) -> tuple[Path, Path]:
+    """Rename an image and its sidecar while preserving the image extension."""
+    if not new_stem or new_stem in {".", ".."}:
+        raise ValueError("Enter a non-empty base name.")
+    if "/" in new_stem or "\\" in new_stem or "\0" in new_stem:
+        raise ValueError("The base name cannot contain path separators.")
+    if new_stem == entry.image_path.stem:
+        return entry.image_path, entry.tag_path
+
+    image_path = Path(entry.image_path)
+    tag_path = Path(entry.tag_path)
+    new_image_path = image_path.with_name(f"{new_stem}{image_path.suffix}")
+    new_tag_path = tag_path.with_name(f"{new_stem}.txt")
+
+    for source in (image_path, tag_path):
+        if not source.is_file():
+            raise FileNotFoundError(f"File does not exist: {source}")
+
+    for source, destination in (
+        (image_path, new_image_path),
+        (tag_path, new_tag_path),
+    ):
+        for sibling in destination.parent.iterdir():
+            if (
+                sibling.name.casefold() == destination.name.casefold()
+                and sibling != source
+            ):
+                raise FileExistsError(
+                    f"A file named {destination.name} already exists."
+                )
+
+    try:
+        image_path.rename(new_image_path)
+    except OSError as exc:
+        raise OSError(f"Could not rename {image_path.name}: {exc}") from exc
+
+    try:
+        tag_path.rename(new_tag_path)
+    except OSError as exc:
+        try:
+            new_image_path.rename(image_path)
+        except OSError as rollback_exc:
+            raise OSError(
+                f"Could not rename {tag_path.name}: {exc}. "
+                f"The image was left as {new_image_path.name} because rollback "
+                f"failed: {rollback_exc}"
+            ) from exc
+        raise OSError(f"Could not rename {tag_path.name}: {exc}") from exc
+
+    return new_image_path, new_tag_path
+
+
 def archive_entries(
     entries: Sequence[ImageEntry],
     destination: Path,

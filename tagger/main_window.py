@@ -28,6 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -75,6 +76,7 @@ from .storage import (
     BatchPreflightError,
     ExternalChangeError,
     WriteRequest,
+    rename_image_pair,
     scan_folder,
     write_tags_atomic,
     write_tags_batch,
@@ -635,11 +637,67 @@ class MainWindow(QMainWindow):
             QItemSelectionModel.SelectionFlag.ClearAndSelect
             | QItemSelectionModel.SelectionFlag.Rows,
         )
+        menu = self._create_image_context_menu()
+        menu.exec(self.image_list.viewport().mapToGlobal(position))
+
+    def _create_image_context_menu(self) -> QMenu:
+        has_entry = self._current_entry() is not None and self.directory is not None
+        rename_action = QAction("Rename...", self)
+        rename_action.setEnabled(has_entry)
+        rename_action.triggered.connect(self._rename_current_image_and_tag)
         delete_action = QAction("Delete", self)
+        delete_action.setEnabled(has_entry)
         delete_action.triggered.connect(self._delete_current_image_and_tag)
         menu = QMenu(self)
+        menu.addAction(rename_action)
         menu.addAction(delete_action)
-        menu.exec(self.image_list.viewport().mapToGlobal(position))
+        return menu
+
+    def _rename_current_image_and_tag(self) -> None:
+        entry = self._current_entry()
+        directory = self.directory
+        if entry is None or directory is None:
+            return
+
+        new_stem, accepted = QInputDialog.getText(
+            self,
+            "Rename Image and Tag",
+            "New base name:",
+            QLineEdit.EchoMode.Normal,
+            entry.image_path.stem,
+        )
+        if not accepted:
+            return
+        new_stem = new_stem.strip()
+        if new_stem == entry.image_path.stem:
+            return
+
+        self.preview_loader.clear()
+        self.preview_loader.wait_for_done()
+        try:
+            new_image_path, new_tag_path = rename_image_pair(entry, new_stem)
+        except (OSError, ValueError) as exc:
+            self._load_directory(
+                directory,
+                preferred_image=entry.image_path,
+                show_issues=False,
+            )
+            QMessageBox.critical(
+                self,
+                "Could Not Rename Image and Tag",
+                str(exc),
+            )
+            return
+
+        self._load_directory(
+            directory,
+            preferred_image=new_image_path,
+            show_issues=False,
+        )
+        self.statusBar().showMessage(
+            f"Renamed pair to {new_image_path.name} and {new_tag_path.name}.",
+            4000,
+        )
 
     def _delete_current_image_and_tag(self) -> None:
         row = self.catalog.row_for_index(self.image_list.currentIndex())

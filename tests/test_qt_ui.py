@@ -22,6 +22,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGroupBox,
+    QInputDialog,
     QLineEdit,
     QMenu,
     QMessageBox,
@@ -620,6 +621,69 @@ def test_image_context_delete_moves_image_and_tag_to_trash(
     current = window._current_entry()
     assert current is not None
     assert current.image_path == tmp_path / "second.png"
+
+
+def test_image_context_menu_renames_selected_image_and_tag(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        lambda *_args: ("renamed", True),
+    )
+
+    menu = window._create_image_context_menu()
+    assert [action.text() for action in menu.actions()] == ["Rename...", "Delete"]
+    menu.actions()[0].trigger()
+
+    assert not image_path.exists()
+    assert not tag_path.exists()
+    assert (tmp_path / "renamed.png").exists()
+    assert (tmp_path / "renamed.txt").read_text(encoding="utf-8") == "cat\n"
+    current = window._current_entry()
+    assert current is not None
+    assert current.image_path == tmp_path / "renamed.png"
+    assert "Renamed pair to renamed.png and renamed.txt" in (
+        window.statusBar().currentMessage()
+    )
+
+
+def test_image_context_rename_collision_keeps_pair(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    create_png(tmp_path / "taken.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        lambda *_args: ("taken", True),
+    )
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "critical",
+        lambda _parent, title, message: errors.append((title, message)),
+    )
+
+    window._rename_current_image_and_tag()
+
+    assert image_path.exists()
+    assert tag_path.read_text(encoding="utf-8") == "cat\n"
+    assert errors
+    assert errors[0][0] == "Could Not Rename Image and Tag"
 
 
 def test_move_to_trash_uses_qfile_instance_api(monkeypatch, tmp_path: Path) -> None:

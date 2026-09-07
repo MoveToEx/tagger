@@ -5,11 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from tagger.domain import ImageEntry
 from tagger.storage import (
     archive_entries,
     BatchPreflightError,
     ExternalChangeError,
     WriteRequest,
+    rename_image_pair,
     scan_folder,
     write_tags_atomic,
     write_tags_batch,
@@ -123,6 +125,75 @@ def test_invalid_utf8_sidecar_is_visible_but_read_only(tmp_path: Path) -> None:
 
     assert not entry.editable
     assert "UTF-8" in (entry.error or "")
+
+
+def test_rename_image_pair_renames_both_files(tmp_path: Path) -> None:
+    image_path = tmp_path / "old.PNG"
+    tag_path = tmp_path / "old.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+    entry = ImageEntry(image_path, tag_path)
+
+    new_image_path, new_tag_path = rename_image_pair(entry, "new name")
+
+    assert new_image_path == tmp_path / "new name.PNG"
+    assert new_tag_path == tmp_path / "new name.txt"
+    assert new_image_path.read_bytes() == b"not decoded by scanner"
+    assert new_tag_path.read_bytes() == b"cat\n"
+    assert not image_path.exists()
+    assert not tag_path.exists()
+
+
+def test_rename_image_pair_rejects_collision_without_changes(tmp_path: Path) -> None:
+    image_path = tmp_path / "old.png"
+    tag_path = tmp_path / "old.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+    touch_image(tmp_path / "taken.png")
+
+    with pytest.raises(FileExistsError, match="taken.png"):
+        rename_image_pair(ImageEntry(image_path, tag_path), "taken")
+
+    assert image_path.exists()
+    assert tag_path.read_bytes() == b"cat\n"
+
+
+def test_rename_image_pair_rejects_path_separator(tmp_path: Path) -> None:
+    image_path = tmp_path / "old.png"
+    tag_path = tmp_path / "old.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+
+    with pytest.raises(ValueError, match="path separators"):
+        rename_image_pair(ImageEntry(image_path, tag_path), "nested/name")
+
+    assert image_path.exists()
+    assert tag_path.exists()
+
+
+def test_rename_image_pair_rolls_back_when_sidecar_rename_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "old.png"
+    tag_path = tmp_path / "old.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+    original_rename = Path.rename
+
+    def fail_for_sidecar(path: Path, target: Path) -> Path:
+        if path == tag_path:
+            raise PermissionError("sidecar is locked")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_for_sidecar)
+
+    with pytest.raises(OSError, match="Could not rename old.txt"):
+        rename_image_pair(ImageEntry(image_path, tag_path), "new")
+
+    assert image_path.exists()
+    assert tag_path.exists()
+    assert not (tmp_path / "new.png").exists()
+    assert not (tmp_path / "new.txt").exists()
 
 
 def test_archive_entries_stores_nested_pairs_with_unique_flat_names(
