@@ -10,6 +10,7 @@ from PySide6.QtCore import (
     QItemSelectionModel,
     QModelIndex,
     QObject,
+    QProcess,
     QByteArray,
     Qt,
 )
@@ -684,6 +685,9 @@ class MainWindow(QMainWindow):
 
     def _create_image_context_menu(self) -> QMenu:
         has_entry = self._current_entry() is not None and self.directory is not None
+        reveal_action = QAction("Reveal in Explorer", self)
+        reveal_action.setEnabled(has_entry)
+        reveal_action.triggered.connect(self._reveal_current_image_in_explorer)
         rename_action = QAction("Rename...", self)
         rename_action.setEnabled(has_entry)
         rename_action.triggered.connect(self._rename_current_image_and_tag)
@@ -693,7 +697,25 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction(rename_action)
         menu.addAction(delete_action)
+        menu.addSeparator()
+        menu.addAction(reveal_action)
         return menu
+
+    def _reveal_current_image_in_explorer(self) -> None:
+        entry = self._current_entry()
+        if entry is None:
+            return
+
+        started, _process_id = QProcess.startDetached(
+            "explorer.exe",
+            ["/select,", str(entry.image_path)],
+        )
+        if not started:
+            QMessageBox.critical(
+                self,
+                "Could Not Open File Explorer",
+                f"Could not reveal {entry.image_path.name} in File Explorer.",
+            )
 
     def _rename_current_image_and_tag(self) -> None:
         entry = self._current_entry()

@@ -1186,7 +1186,13 @@ def test_image_context_menu_renames_selected_image_and_tag(
     )
 
     menu = window._create_image_context_menu()
-    assert [action.text() for action in menu.actions()] == ["Rename...", "Delete"]
+    assert [action.text() for action in menu.actions()] == [
+        "Rename...",
+        "Delete",
+        "",
+        "Reveal in Explorer",
+    ]
+    assert menu.actions()[2].isSeparator()
     menu.actions()[0].trigger()
 
     assert not image_path.exists()
@@ -1199,6 +1205,34 @@ def test_image_context_menu_renames_selected_image_and_tag(
     assert "Renamed pair to renamed.png and renamed.txt" in (
         window.statusBar().currentMessage()
     )
+
+
+def test_image_context_menu_reveals_selected_image_in_explorer(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample image.png"
+    create_png(image_path)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    started: list[tuple[str, list[str]]] = []
+
+    class FakeQProcess:
+        @staticmethod
+        def startDetached(
+            program: str, arguments: list[str]
+        ) -> tuple[bool, int]:
+            started.append((program, arguments))
+            return True, 123
+
+    monkeypatch.setattr(main_window_module, "QProcess", FakeQProcess)
+
+    menu = window._create_image_context_menu()
+    menu.actions()[3].trigger()
+
+    assert started == [
+        ("explorer.exe", ["/select,", str(image_path)]),
+    ]
 
 
 def test_image_context_rename_collision_keeps_pair(
