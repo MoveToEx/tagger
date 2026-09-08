@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QObject,
     QProcess,
+    QSignalBlocker,
     QByteArray,
     Qt,
 )
@@ -599,7 +600,13 @@ class MainWindow(QMainWindow):
         self.directory = directory
         self._update_window_title()
         self._record_recent_folder(directory)
-        self.catalog.set_entries(result.entries, directory)
+        selection_model = self.image_list.selectionModel()
+        selection_blocker = QSignalBlocker(selection_model)
+        try:
+            self.catalog.set_entries(result.entries, directory)
+            self.image_list.setCurrentIndex(QModelIndex())
+        finally:
+            selection_blocker.unblock()
         self.tag_library.set_folder_entries(result.entries)
         self.image_list.expandAll()
 

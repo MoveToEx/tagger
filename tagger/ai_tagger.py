@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from functools import cache
 import importlib.util
 import os
 from pathlib import Path
@@ -56,6 +57,7 @@ def missing_ai_dependencies() -> list[str]:
     return [name for name in AI_DEPENDENCIES if importlib.util.find_spec(name) is None]
 
 
+@cache
 def ai_dependencies_available() -> bool:
     return not missing_ai_dependencies()
 

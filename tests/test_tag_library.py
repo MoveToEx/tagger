@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import tagger.tag_library as tag_library_module
+from tagger.domain import ImageEntry
 from tagger.tag_library import (
     TagLibrary,
     download_danbooru_tags,
@@ -70,3 +71,56 @@ def test_csv_content_is_not_treated_as_a_binary_library(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="supported binary file"):
         TagLibrary(path)
+
+
+def test_folder_tags_are_merged_without_rebuilding_global_index(
+    tmp_path: Path, monkeypatch
+) -> None:
+    library_path = tmp_path / "tags.bin"
+    tag_library_module.write_tag_library(
+        library_path,
+        [("shared_tag", 100), ("global_tag", 50), ("local_tag", 1)],
+    )
+    library = TagLibrary(library_path)
+    ranked = library._ranked
+    trigrams = library._trigrams
+    entries = [
+        ImageEntry(
+            tmp_path / f"image-{index}.png",
+            tmp_path / f"image-{index}.txt",
+            ["shared tag", "local_tag", "folder_tag"],
+        )
+        for index in range(2)
+    ]
+
+    monkeypatch.setattr(
+        library,
+        "_rebuild_index",
+        lambda: pytest.fail("folder tags must not rebuild the global index"),
+    )
+    library.set_folder_entries(entries)
+
+    assert library._ranked is ranked
+    assert library._trigrams is trigrams
+    assert library.suggestions("tag") == [
+        "shared tag",
+        "global_tag",
+        "folder_tag",
+        "local_tag",
+    ]
+    assert library.suggestions("ta") == [
+        "shared tag",
+        "global_tag",
+        "folder_tag",
+        "local_tag",
+    ]
+    assert library.size == 4
+
+    library.clear_folder_tags()
+
+    assert library.suggestions("tag") == [
+        "shared_tag",
+        "global_tag",
+        "local_tag",
+    ]
+    assert library.size == 3

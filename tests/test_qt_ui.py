@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import (
     QItemSelectionModel,
     QMimeData,
+    QModelIndex,
     QPoint,
     QPointF,
     QSize,
@@ -40,6 +41,7 @@ import tagger.main_window as main_window_module
 import tagger.archive as archive_module
 import tagger.ai_tagger as ai_tagger_module
 from tagger.ai_tagger import (
+    AI_DEPENDENCIES,
     AITaggingDialog,
     MODEL_REPOSITORIES,
     ModelManagementDialog,
@@ -95,6 +97,23 @@ def create_cached_model(cache_directory: Path, repo_id: str) -> None:
     snapshot.mkdir(parents=True)
     (snapshot / "config.json").touch()
     (snapshot / "selected_tags.csv").touch()
+
+
+def test_ai_dependency_availability_is_cached(monkeypatch) -> None:
+    checked: list[str] = []
+
+    def find_spec(name: str):
+        checked.append(name)
+        return None if name == "torch" else object()
+
+    ai_tagger_module.ai_dependencies_available.cache_clear()
+    monkeypatch.setattr(ai_tagger_module.importlib.util, "find_spec", find_spec)
+    try:
+        assert not ai_tagger_module.ai_dependencies_available()
+        assert not ai_tagger_module.ai_dependencies_available()
+        assert checked == list(AI_DEPENDENCIES)
+    finally:
+        ai_tagger_module.ai_dependencies_available.cache_clear()
 
 
 def assert_stable_widget_size(
@@ -800,6 +819,28 @@ def test_main_window_opens_most_recent_folder_on_startup(
     assert window.catalog.image_count == 1
     assert window.windowTitle() == f"{recent_a.name} - Image Tagger"
     qtbot.waitUntil(lambda: "32 × 24 px" in window.image_info_label.text())
+
+
+def test_folder_load_emits_one_current_image_change(
+    qtbot, tmp_path: Path
+) -> None:
+    for index in range(40):
+        create_png(tmp_path / f"image-{index:02d}.png")
+        (tmp_path / f"image-{index:02d}.txt").write_text(
+            "cat, dog\n", encoding="utf-8"
+        )
+    window = MainWindow()
+    qtbot.addWidget(window)
+    current_changes: list[QModelIndex] = []
+    window.image_list.selectionModel().currentChanged.connect(
+        lambda current, _previous: current_changes.append(current)
+    )
+
+    window._load_directory(tmp_path, show_issues=False)
+
+    assert len(current_changes) == 1
+    assert window.catalog.entry_for_index(current_changes[0]) is not None
+    assert window.preview_loader.wait_for_done()
 
 
 def test_file_menu_disables_missing_recent_folder(

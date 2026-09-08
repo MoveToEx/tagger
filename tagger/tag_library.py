@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from heapq import merge
 import json
 import os
 from pathlib import Path
@@ -56,6 +57,7 @@ DATASET_ID = "qdlabs/danbooru-tags"
 DATASET_TAGS_URL = (
     f"https://huggingface.co/datasets/{DATASET_ID}/resolve/main/tags.jsonl"
 )
+_RankedTag = tuple[str, str, int]
 
 
 @dataclass(frozen=True)
@@ -119,7 +121,8 @@ class TagLibrary(QObject):
         self.escape_parentheses = escape_parentheses
         self._danbooru: dict[str, tuple[str, int]] = {}
         self._folder: dict[str, tuple[str, int]] = {}
-        self._ranked: list[tuple[str, str, int]] = []
+        self._ranked: list[_RankedTag] = []
+        self._folder_ranked: list[_RankedTag] = []
         self._trigrams: dict[str, list[int]] = {}
         self.reload_danbooru()
 
@@ -141,6 +144,7 @@ class TagLibrary(QObject):
                 records[key] = (name, count)
         self._danbooru = records
         self._rebuild_index()
+        self._rebuild_folder_ranking()
         self.changed.emit()
 
     def set_transform_options(
@@ -160,14 +164,14 @@ class TagLibrary(QObject):
         self._folder = {
             _search_key(name): (name, count) for name, count in counts.items()
         }
-        self._rebuild_index()
+        self._rebuild_folder_ranking()
         self.changed.emit()
 
     def clear_folder_tags(self) -> None:
         if not self._folder:
             return
         self._folder.clear()
-        self._rebuild_index()
+        self._folder_ranked.clear()
         self.changed.emit()
 
     def suggestions(self, text: str, limit: int = 12) -> list[str]:
@@ -184,42 +188,73 @@ class TagLibrary(QObject):
             if separator
             else set()
         )
-        if len(query) >= 3:
-            grams = {query[index : index + 3] for index in range(len(query) - 2)}
-            posting_lists = [self._trigrams.get(gram, ()) for gram in grams]
-            if not posting_lists or any(not posting for posting in posting_lists):
-                return []
-            candidates: Iterable[int] = min(posting_lists, key=len)
-        else:
-            candidates = range(len(self._ranked))
-
         result: list[str] = []
-        for index in candidates:
-            name, key, _count = self._ranked[index]
-            if key not in completed and query in key:
-                result.append(name)
-                if len(result) == limit:
-                    break
+        matches = merge(
+            self._matching_danbooru_tags(query, completed),
+            self._matching_folder_tags(query, completed),
+            key=_ranked_tag_key,
+        )
+        for name, _key, _count in matches:
+            result.append(name)
+            if len(result) == limit:
+                break
         return result
 
     @property
     def size(self) -> int:
-        return len(self._ranked)
+        return len(self._danbooru) + sum(
+            key not in self._danbooru for key in self._folder
+        )
+
+    def _matching_danbooru_tags(
+        self, query: str, completed: set[str]
+    ) -> Iterable[_RankedTag]:
+        if len(query) >= 3:
+            grams = {query[index : index + 3] for index in range(len(query) - 2)}
+            posting_lists = [self._trigrams.get(gram, ()) for gram in grams]
+            if not posting_lists or any(not posting for posting in posting_lists):
+                return
+            candidates: Iterable[int] = min(posting_lists, key=len)
+        else:
+            candidates = range(len(self._ranked))
+
+        for index in candidates:
+            item = self._ranked[index]
+            _name, key, _count = item
+            if key not in self._folder and key not in completed and query in key:
+                yield item
+
+    def _matching_folder_tags(
+        self, query: str, completed: set[str]
+    ) -> Iterable[_RankedTag]:
+        return (
+            item
+            for item in self._folder_ranked
+            if item[1] not in completed and query in item[1]
+        )
 
     def _rebuild_index(self) -> None:
-        merged = dict(self._danbooru)
-        for key, (name, count) in self._folder.items():
-            existing = merged.get(key)
-            merged[key] = (name, max(count, existing[1] if existing else 0))
         self._ranked = sorted(
-            ((name, key, count) for key, (name, count) in merged.items()),
-            key=lambda item: (-item[2], item[1], item[0]),
+            ((name, key, count) for key, (name, count) in self._danbooru.items()),
+            key=_ranked_tag_key,
         )
         trigrams: dict[str, list[int]] = {}
         for index, (_name, key, _count) in enumerate(self._ranked):
             for gram in {key[offset : offset + 3] for offset in range(len(key) - 2)}:
                 trigrams.setdefault(gram, []).append(index)
         self._trigrams = trigrams
+
+    def _rebuild_folder_ranking(self) -> None:
+        ranked: list[_RankedTag] = []
+        for key, (name, count) in self._folder.items():
+            existing = self._danbooru.get(key)
+            ranked.append((name, key, max(count, existing[1] if existing else 0)))
+        self._folder_ranked = sorted(ranked, key=_ranked_tag_key)
+
+
+def _ranked_tag_key(item: _RankedTag) -> tuple[int, str, str]:
+    name, key, count = item
+    return (-count, key, name)
 
 
 class TagCompleter(QObject):
