@@ -22,6 +22,7 @@ from PySide6.QtGui import (
     QDragMoveEvent,
     QDropEvent,
     QGuiApplication,
+    QIcon,
     QImage,
     QImageReader,
     QKeyEvent,
@@ -42,6 +43,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QToolBar,
+    QToolButton,
     QTreeView,
     QVBoxLayout,
     QWidget,
@@ -65,6 +67,7 @@ from .domain import (
     tag_matches_pattern,
 )
 from .global_search import GlobalTagSearchDialog
+from .paths import PROJECT_ROOT
 from .preview import ImageView, PreviewLoader
 from .review import ReviewDialog
 from .settings import (
@@ -90,10 +93,12 @@ from .tag_library import (
     attach_tag_completer,
 )
 from .traversal import TraversalDialog
+from .widgets import stabilize_checked_tool_button
 
 
 RECENT_FOLDERS_SETTING = "recent_folders"
 MAX_RECENT_FOLDERS = 10
+TOOLBAR_ICON_DIRECTORY = PROJECT_ROOT / "assets" / "icons"
 
 
 def move_to_trash(path: Path) -> bool:
@@ -240,10 +245,12 @@ class MainWindow(QMainWindow):
             "Open Folder...",
             self,
         )
+        self.open_action.setToolTip("Open folder")
         self.open_action.setShortcut(QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.open_folder)
 
         self.close_folder_action = QAction("Close Folder", self)
+        self.close_folder_action.setToolTip("Close folder")
         self.close_folder_action.setShortcut(QKeySequence.StandardKey.Close)
         self.close_folder_action.triggered.connect(self.close_folder)
 
@@ -291,6 +298,8 @@ class MainWindow(QMainWindow):
             "Next", self
         )
         self.last_action = QAction("Last", self)
+        self.previous_action.setToolTip("Previous image")
+        self.next_action.setToolTip("Next image")
         self.first_action.setShortcut(QKeySequence("Ctrl+Home"))
         self.previous_action.setShortcut(QKeySequence("PgUp"))
         self.next_action.setShortcut(QKeySequence("PgDown"))
@@ -322,6 +331,7 @@ class MainWindow(QMainWindow):
         self.normalize_action.triggered.connect(self._normalize_all_tags)
 
         self.fit_action = QAction("Fit to Window", self)
+        self.fit_action.setToolTip("Fit to window")
         self.fit_action.setCheckable(True)
         self.fit_action.setChecked(True)
         self.fit_action.setShortcut(QKeySequence("Ctrl+0"))
@@ -333,11 +343,26 @@ class MainWindow(QMainWindow):
         self.actual_size_action.triggered.connect(self._actual_size)
 
         self.zoom_in_action = QAction("Zoom In", self)
+        self.zoom_in_action.setToolTip("Zoom in")
         self.zoom_in_action.setShortcut(QKeySequence.StandardKey.ZoomIn)
         self.zoom_in_action.triggered.connect(self._zoom_in)
         self.zoom_out_action = QAction("Zoom Out", self)
+        self.zoom_out_action.setToolTip("Zoom out")
         self.zoom_out_action.setShortcut(QKeySequence.StandardKey.ZoomOut)
         self.zoom_out_action.triggered.connect(self._zoom_out)
+
+        toolbar_icons = {
+            self.open_action: "open.svg",
+            self.close_folder_action: "close.svg",
+            self.previous_action: "previous.svg",
+            self.next_action: "next.svg",
+            self.zoom_in_action: "zoom-in.svg",
+            self.fit_action: "fit.svg",
+            self.zoom_out_action: "zoom-out.svg",
+        }
+        for action, filename in toolbar_icons.items():
+            action.setIcon(QIcon(str(TOOLBAR_ICON_DIRECTORY / filename)))
+            action.setIconVisibleInMenu(False)
 
     def _create_menus_and_toolbar(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -388,10 +413,19 @@ class MainWindow(QMainWindow):
 
         toolbar = QToolBar("Main", self)
         toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.addAction(self.open_action)
+        toolbar.addAction(self.close_folder_action)
+        toolbar.addSeparator()
         toolbar.addAction(self.previous_action)
         toolbar.addAction(self.next_action)
         toolbar.addSeparator()
+        toolbar.addAction(self.zoom_in_action)
         toolbar.addAction(self.fit_action)
+        toolbar.addAction(self.zoom_out_action)
+        fit_button = toolbar.widgetForAction(self.fit_action)
+        if isinstance(fit_button, QToolButton):
+            stabilize_checked_tool_button(fit_button)
         search_spacer = QWidget()
         search_spacer.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred

@@ -8,8 +8,10 @@ from PySide6.QtWidgets import (
     QProxyStyle,
     QSizePolicy,
     QStyle,
+    QStyleOption,
     QStyleOptionComplex,
     QStyleOptionSpinBox,
+    QToolButton,
     QWidget,
 )
 
@@ -35,6 +37,34 @@ class _StableSpinBoxStyle(QProxyStyle):
             if not option.state & QStyle.StateFlag.State_Sunken:
                 option.activeSubControls = QStyle.SubControl.SC_None
         super().drawComplexControl(control, option, painter, widget)
+
+
+class _StableCheckedToolButtonStyle(QProxyStyle):
+    @override
+    def pixelMetric(
+        self,
+        metric: QStyle.PixelMetric,
+        option: QStyleOption | None = None,
+        widget: QWidget | None = None,
+    ) -> int:
+        if (
+            metric
+            in {
+                QStyle.PixelMetric.PM_ButtonShiftHorizontal,
+                QStyle.PixelMetric.PM_ButtonShiftVertical,
+            }
+            and isinstance(widget, QToolButton)
+            and widget.isChecked()
+            and not widget.isDown()
+        ):
+            return 0
+        return super().pixelMetric(metric, option, widget)
+
+
+def stabilize_checked_tool_button(button: QToolButton) -> None:
+    stable_style = _StableCheckedToolButtonStyle(button.style().objectName())
+    stable_style.setParent(button)
+    button.setStyle(stable_style)
 
 
 def stabilize_widget_size(

@@ -15,6 +15,7 @@ from PySide6.QtCore import (
     QUrl,
 )
 from PySide6.QtGui import (
+    QAction,
     QColor,
     QDragEnterEvent,
     QDropEvent,
@@ -30,9 +31,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QMessageBox,
+    QProxyStyle,
     QSizePolicy,
     QStyle,
     QStyleOptionSpinBox,
+    QToolBar,
+    QToolButton,
     QTreeWidget,
     QWidget,
 )
@@ -79,6 +83,7 @@ from tagger.tag_library import (
     write_tag_library,
 )
 from tagger.traversal import TraversalDialog
+from tagger.widgets import _StableCheckedToolButtonStyle
 
 
 def create_png(path: Path, color: str = "#2f6fed") -> None:
@@ -930,6 +935,88 @@ def test_navigation_actions_stop_at_boundaries(qtbot, tmp_path: Path) -> None:
     assert window.image_list.currentIndex().row() == 1
     assert not window.next_action.isEnabled()
     assert window.previous_action.isEnabled()
+
+
+def test_toolbar_uses_navigation_and_zoom_icons(
+    qtbot, tmp_path: Path
+) -> None:
+    create_png(tmp_path / "sample.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    window.show()
+    qtbot.waitUntil(lambda: window.image_view._pixmap is not None)
+    toolbar = window.findChild(QToolBar)
+    assert toolbar is not None
+
+    toolbar_actions_with_icons = [
+        window.open_action,
+        window.close_folder_action,
+        window.previous_action,
+        window.next_action,
+        window.zoom_in_action,
+        window.fit_action,
+        window.zoom_out_action,
+    ]
+    buttons: dict[QAction, QToolButton] = {}
+    for action in toolbar_actions_with_icons:
+        widget = toolbar.widgetForAction(action)
+        assert isinstance(widget, QToolButton)
+        assert not action.icon().isNull()
+        assert not action.isIconVisibleInMenu()
+        assert (
+            widget.toolButtonStyle()
+            == Qt.ToolButtonStyle.ToolButtonIconOnly
+        )
+        buttons[action] = widget
+
+    toolbar_actions = toolbar.actions()
+    assert toolbar_actions[:2] == [
+        window.open_action,
+        window.close_folder_action,
+    ]
+    assert toolbar_actions[2].isSeparator()
+    assert toolbar_actions.index(window.zoom_in_action) < toolbar_actions.index(
+        window.fit_action
+    ) < toolbar_actions.index(window.zoom_out_action)
+
+    assert window.previous_action.text() == "Previous"
+    assert window.next_action.text() == "Next"
+    initial_zoom = window.image_view._zoom
+    buttons[window.zoom_in_action].click()
+    assert window.image_view._zoom > initial_zoom
+    buttons[window.zoom_out_action].click()
+    assert window.image_view._zoom == initial_zoom
+
+
+def test_checked_toolbar_style_only_suppresses_released_button_shift(qtbot) -> None:
+    class ShiftStyle(QProxyStyle):
+        def pixelMetric(self, metric, option=None, widget=None) -> int:
+            if metric in {
+                QStyle.PixelMetric.PM_ButtonShiftHorizontal,
+                QStyle.PixelMetric.PM_ButtonShiftVertical,
+            }:
+                return 2
+            return super().pixelMetric(metric, option, widget)
+
+    button = QToolButton()
+    qtbot.addWidget(button)
+    button.setCheckable(True)
+    style = _StableCheckedToolButtonStyle(ShiftStyle())
+    style.setParent(button)
+    button.setStyle(style)
+    horizontal_shift = QStyle.PixelMetric.PM_ButtonShiftHorizontal
+
+    button.setChecked(True)
+    button.setDown(False)
+    assert style.pixelMetric(horizontal_shift, None, button) == 0
+
+    button.setDown(True)
+    assert style.pixelMetric(horizontal_shift, None, button) == 2
+
+    button.setDown(False)
+    button.setChecked(False)
+    assert style.pixelMetric(horizontal_shift, None, button) == 2
 
 
 def test_mouse_wheel_navigate_setting_changes_images_and_menu_item_is_removed(
