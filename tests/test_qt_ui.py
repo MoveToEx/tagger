@@ -54,6 +54,7 @@ from tagger.storage import ArchiveResult
 from tagger.bulk_operation import BulkOperationDialog
 from tagger.domain import ImageEntry, TagOperation
 from tagger.complex_filter import ComplexFilterDialog
+from tagger.delete_filter import DeleteFilterDialog
 from tagger.main_window import MAX_RECENT_FOLDERS, RECENT_FOLDERS_SETTING, MainWindow
 from tagger.global_search import GlobalTagSearchDialog
 from tagger.preview import (
@@ -1436,6 +1437,173 @@ def test_image_context_delete_can_be_cancelled(
 
     window._delete_current_image_and_tag()
 
+    assert image_path.exists()
+    assert tag_path.exists()
+
+
+def test_image_menu_exposes_delete_filter_for_open_folder(
+    qtbot, tmp_path: Path
+) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    image_menu = next(
+        menu
+        for menu in window.menuBar().findChildren(QMenu)
+        if menu.title() == "&Image"
+    )
+    assert image_menu.actions() == [window.delete_filter_action]
+    assert window.delete_filter_action.text() == "Delete Filter..."
+    assert not window.delete_filter_action.isEnabled()
+
+    create_png(tmp_path / "sample.png")
+    window._load_directory(tmp_path, show_issues=False)
+
+    assert window.delete_filter_action.isEnabled()
+
+
+def test_delete_filter_shortcuts_toggle_and_navigate(
+    qtbot, tmp_path: Path
+) -> None:
+    entries: list[ImageEntry] = []
+    for name in ["first", "second", "third"]:
+        image_path = tmp_path / f"{name}.png"
+        tag_path = tmp_path / f"{name}.txt"
+        create_png(image_path)
+        tag_path.write_text("cat\n", encoding="utf-8")
+        entries.append(ImageEntry(image_path, tag_path, ["cat"], b"cat\n"))
+    dialog = DeleteFilterDialog(entries)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    assert dialog.current_index == 0
+    assert not dialog.delete_checkbox.isChecked()
+    assert dialog.findChildren(QGroupBox) == []
+    assert dialog.delete_checkbox.styleSheet() == (
+        "QCheckBox::indicator { width: 12px; height: 12px; }"
+    )
+    checkbox_position = dialog.delete_checkbox.mapTo(dialog, QPoint())
+    cancel_position = dialog.cancel_button.mapTo(dialog, QPoint())
+    back_position = dialog.back_button.mapTo(dialog, QPoint())
+    next_position = dialog.next_button.mapTo(dialog, QPoint())
+    finish_position = dialog.finish_button.mapTo(dialog, QPoint())
+    assert checkbox_position.y() < back_position.y()
+    assert cancel_position.x() < back_position.x()
+    assert back_position.x() < next_position.x() < finish_position.x()
+    assert cancel_position.y() == back_position.y()
+    qtbot.keyClick(dialog, Qt.Key.Key_Space)
+    assert dialog.delete_checkbox.isChecked()
+    assert dialog.marked_for_deletion == {tmp_path / "first.png"}
+
+    qtbot.keyClick(dialog, Qt.Key.Key_Right)
+    assert dialog.current_index == 1
+    assert not dialog.delete_checkbox.isChecked()
+    qtbot.keyClick(dialog, Qt.Key.Key_Return)
+    assert dialog.current_index == 2
+    qtbot.keyClick(dialog, Qt.Key.Key_Left)
+    assert dialog.current_index == 1
+    dialog._back()
+    assert dialog.current_index == 0
+    assert dialog.delete_checkbox.isChecked()
+    assert "Marked for deletion 1" in dialog.progress_label.text()
+
+
+def test_delete_filter_finishes_early_and_keeps_unreviewed_images(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    entries: list[ImageEntry] = []
+    for name in ["first", "second", "third"]:
+        image_path = tmp_path / f"{name}.png"
+        tag_path = tmp_path / f"{name}.txt"
+        create_png(image_path)
+        tag_path.write_text("cat\n", encoding="utf-8")
+        entries.append(ImageEntry(image_path, tag_path, ["cat"], b"cat\n"))
+    moved: list[Path] = []
+
+    def fake_move_to_trash(path: Path) -> bool:
+        moved.append(path)
+        path.unlink()
+        return True
+
+    dialog = DeleteFilterDialog(entries, trash_file=fake_move_to_trash)
+    qtbot.addWidget(dialog)
+    dialog._toggle_current()
+    prompts: list[tuple[str, str]] = []
+    answers = iter(
+        [QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Yes]
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, message, *_args: (
+            prompts.append((title, message)) or next(answers)
+        ),
+    )
+
+    dialog._finish()
+    assert moved == []
+    assert dialog.commit_result is None
+    assert all(
+        path.exists()
+        for entry in entries
+        for path in (entry.image_path, entry.tag_path)
+    )
+    dialog._finish()
+
+    assert prompts == [
+        (
+            "Delete Marked Images?",
+            "Move 1 marked image(s) and their tag files to the Trash?",
+        ),
+        (
+            "Delete Marked Images?",
+            "Move 1 marked image(s) and their tag files to the Trash?",
+        ),
+    ]
+    assert moved == [tmp_path / "first.png", tmp_path / "first.txt"]
+    assert dialog.result() == DeleteFilterDialog.DialogCode.Accepted
+    assert dialog.commit_result is not None
+    assert dialog.commit_result.complete
+    assert dialog.commit_result.deleted_images == [tmp_path / "first.png"]
+    for name in ["second", "third"]:
+        assert (tmp_path / f"{name}.png").exists()
+        assert (tmp_path / f"{name}.txt").exists()
+
+
+def test_delete_filter_cancel_confirms_staged_changes(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    dialog = DeleteFilterDialog(
+        [ImageEntry(image_path, tag_path, ["cat"], b"cat\n")],
+        trash_file=lambda _path: False,
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog._toggle_current()
+    answers = iter(
+        [QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Discard]
+    )
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, _title, message, *_args: (
+            prompts.append(message) or next(answers)
+        ),
+    )
+
+    dialog.reject()
+    assert dialog.isVisible()
+    dialog.reject()
+
+    assert len(prompts) == 2
+    assert all("uncommitted changes" in message for message in prompts)
+    assert dialog.result() == DeleteFilterDialog.DialogCode.Rejected
     assert image_path.exists()
     assert tag_path.exists()
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 from typing import cast, override
 
 from PySide6.QtCore import (
@@ -58,6 +58,7 @@ from .ai_tagger import (
 from .bulk_operation import BulkOperationDialog
 from .catalog import ImageCatalogModel
 from .complex_filter import ComplexFilterDialog
+from .delete_filter import DeleteFilterDialog
 from .domain import (
     ImageEntry,
     TagOperation,
@@ -280,6 +281,9 @@ class MainWindow(QMainWindow):
         self.bulk_operation_action = QAction("Bulk Operation...", self)
         self.bulk_operation_action.triggered.connect(self._open_bulk_operation)
 
+        self.delete_filter_action = QAction("Delete Filter...", self)
+        self.delete_filter_action.triggered.connect(self._open_delete_filter)
+
         self.settings_action = QAction("Settings...", self)
         self.settings_action.triggered.connect(self._open_settings)
 
@@ -391,6 +395,8 @@ class MainWindow(QMainWindow):
                 self.last_action,
             ]
         )
+        image_menu = self.menuBar().addMenu("&Image")
+        image_menu.addAction(self.delete_filter_action)
         tags_menu = self.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
         tags_menu.addAction(self.review_action)
@@ -890,6 +896,31 @@ class MainWindow(QMainWindow):
                 preferred_image=current.image_path if current else None,
                 show_issues=False,
             )
+
+    def _open_delete_filter(self) -> None:
+        if not self.catalog.entries or self.directory is None:
+            return
+        current = self._current_entry()
+        dialog = DeleteFilterDialog(
+            self.catalog.entries,
+            self,
+            trash_file=move_to_trash,
+        )
+        if (
+            dialog.exec() == DeleteFilterDialog.DialogCode.Accepted
+            and dialog.commit_result is not None
+        ):
+            self._load_directory(
+                self.directory,
+                preferred_image=current.image_path if current else None,
+                show_issues=False,
+            )
+            deleted_count = len(dialog.commit_result.deleted_images)
+            if deleted_count:
+                self.statusBar().showMessage(
+                    f"Moved {deleted_count} marked image(s) to Trash.",
+                    4000,
+                )
 
     def _open_complex_filter(self) -> None:
         if not self.catalog.entries:
@@ -1409,6 +1440,7 @@ class MainWindow(QMainWindow):
         )
         self.search_input.setEnabled(count > 0)
         self.global_search_action.setEnabled(count > 0)
+        self.delete_filter_action.setEnabled(count > 0)
         self.review_action.setEnabled(count > 0 and any(entry.editable and entry.tags for entry in self.catalog.entries))
         self.complex_filter_action.setEnabled(count > 0)
         has_previous = (
