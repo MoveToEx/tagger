@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGroupBox,
     QInputDialog,
+    QLabel,
     QLineEdit,
     QMenu,
     QMessageBox,
@@ -1507,6 +1508,69 @@ def test_delete_filter_shortcuts_toggle_and_navigate(
     assert dialog.current_index == 0
     assert dialog.delete_checkbox.isChecked()
     assert "Marked for deletion 1" in dialog.progress_label.text()
+
+
+def test_delete_filter_uses_simple_fitted_image_click_decisions(
+    qtbot, tmp_path: Path
+) -> None:
+    entries: list[ImageEntry] = []
+    for name in ["first", "second", "third"]:
+        image_path = tmp_path / f"{name}.png"
+        tag_path = tmp_path / f"{name}.txt"
+        create_png(image_path)
+        tag_path.write_text("cat\n", encoding="utf-8")
+        entries.append(ImageEntry(image_path, tag_path, ["cat"], b"cat\n"))
+    dialog = DeleteFilterDialog(entries)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+    qtbot.waitUntil(
+        lambda: dialog.image_view.pixmap() is not None
+        and not dialog.image_view.pixmap().isNull()
+    )
+
+    assert isinstance(dialog.image_view, QLabel)
+    assert not isinstance(dialog.image_view, ImageView)
+    assert not hasattr(dialog.image_view, "zoom_in")
+    assert not hasattr(dialog.image_view, "horizontalScrollBar")
+    displayed = dialog.image_view.pixmap()
+    assert displayed is not None
+    assert displayed.width() <= dialog.image_view.contentsRect().width()
+    assert displayed.height() <= dialog.image_view.contentsRect().height()
+    dialog._toggle_current()
+    qtbot.mouseClick(
+        dialog.image_view,
+        Qt.MouseButton.LeftButton,
+    )
+
+    assert dialog.current_index == 1
+    assert tmp_path / "first.png" not in dialog.marked_for_deletion
+    qtbot.waitUntil(
+        lambda: dialog.image_view.pixmap() is not None
+        and not dialog.image_view.pixmap().isNull()
+    )
+    qtbot.mouseClick(
+        dialog.image_view,
+        Qt.MouseButton.RightButton,
+    )
+
+    assert dialog.current_index == 2
+    assert dialog.marked_for_deletion == {tmp_path / "second.png"}
+    qtbot.waitUntil(
+        lambda: dialog.image_view.pixmap() is not None
+        and not dialog.image_view.pixmap().isNull()
+    )
+    qtbot.mouseClick(
+        dialog.image_view,
+        Qt.MouseButton.RightButton,
+    )
+
+    assert dialog.current_index == 2
+    assert dialog.delete_checkbox.isChecked()
+    assert dialog.marked_for_deletion == {
+        tmp_path / "second.png",
+        tmp_path / "third.png",
+    }
 
 
 def test_delete_filter_finishes_early_and_keeps_unreviewed_images(

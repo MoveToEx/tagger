@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import cast, override
 
 from PySide6.QtCore import QEvent, QObject, QSignalBlocker, Qt
-from PySide6.QtGui import QCloseEvent, QKeyEvent
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from .domain import ImageEntry
-from .preview import ImageView, PreviewLoader
+from .preview import PreviewLoader
 from .trash import move_to_trash
 
 
@@ -61,7 +62,17 @@ class DeleteFilterDialog(QDialog):
         self.path_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        self.image_view = ImageView()
+        self.image_view = QLabel("Loading image...")
+        self.image_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_view.setMinimumSize(240, 180)
+        self.image_view.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Ignored,
+        )
+        self.image_view.setStyleSheet(
+            "QLabel { color: #667085; background: #f2f4f7; }"
+        )
+        self._image_pixmap: QPixmap | None = None
         self.preview_loader = PreviewLoader(self)
         self.preview_loader.loaded.connect(self._preview_loaded)
 
@@ -133,7 +144,7 @@ class DeleteFilterDialog(QDialog):
         if entry is None:
             self.progress_label.setText("No images to review")
             self.path_label.clear()
-            self.image_view.clear_image("No images to review")
+            self._clear_image("No images to review")
             self.delete_checkbox.setEnabled(False)
             self.back_button.setEnabled(False)
             self.next_button.setEnabled(False)
@@ -150,7 +161,7 @@ class DeleteFilterDialog(QDialog):
             entry.image_path in self.marked_for_deletion
         )
         del blocker
-        self.image_view.clear_image("Loading image...")
+        self._clear_image("Loading image...")
         self.preview_loader.load(entry.image_path)
         self.back_button.setEnabled(self.current_index > 0)
         self.next_button.setEnabled(self.current_index + 1 < len(self.entries))
@@ -160,9 +171,30 @@ class DeleteFilterDialog(QDialog):
 
     def _preview_loaded(self, image, error: str) -> None:
         if error or image.isNull():
-            self.image_view.clear_image(f"Could not display image\n{error}")
+            self._clear_image(f"Could not display image\n{error}")
         else:
-            self.image_view.set_image(image)
+            self._image_pixmap = QPixmap.fromImage(image)
+            self.image_view.setText("")
+            self._fit_current_image()
+
+    def _clear_image(self, message: str) -> None:
+        self._image_pixmap = None
+        self.image_view.clear()
+        self.image_view.setText(message)
+
+    def _fit_current_image(self) -> None:
+        if self._image_pixmap is None:
+            return
+        available = self.image_view.contentsRect().size()
+        if available.isEmpty():
+            return
+        self.image_view.setPixmap(
+            self._image_pixmap.scaled(
+                available,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def _deletion_toggled(self, delete_image: bool) -> None:
         entry = self.current_entry
@@ -183,6 +215,28 @@ class DeleteFilterDialog(QDialog):
         if self.current_entry is not None:
             self.delete_checkbox.toggle()
 
+    def _set_current_decision(self, *, delete_image: bool) -> None:
+        entry = self.current_entry
+        if entry is None:
+            return
+        self.reviewed_indices.add(self.current_index)
+        if delete_image:
+            self.marked_for_deletion.add(entry.image_path)
+        else:
+            self.marked_for_deletion.discard(entry.image_path)
+        blocker = QSignalBlocker(self.delete_checkbox)
+        self.delete_checkbox.setChecked(delete_image)
+        del blocker
+        if self.current_index + 1 < len(self.entries):
+            self.current_index += 1
+            self._load_current()
+        else:
+            self.progress_label.setText(
+                f"Image {self.current_index + 1} of {len(self.entries)}"
+                f" | Reviewed {len(self.reviewed_indices)} of {len(self.entries)}"
+                f" | Marked for deletion {len(self.marked_for_deletion)}"
+            )
+
     def _back(self) -> None:
         if self.current_index <= 0:
             return
@@ -199,6 +253,18 @@ class DeleteFilterDialog(QDialog):
 
     @override
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.image_view:
+            if event.type() == QEvent.Type.Resize:
+                self._fit_current_image()
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                mouse_event = cast(QMouseEvent, event)
+                if self._image_pixmap is not None:
+                    if mouse_event.button() == Qt.MouseButton.LeftButton:
+                        self._set_current_decision(delete_image=False)
+                        return True
+                    if mouse_event.button() == Qt.MouseButton.RightButton:
+                        self._set_current_decision(delete_image=True)
+                        return True
         if event.type() == QEvent.Type.KeyPress:
             key_event = cast(QKeyEvent, event)
             if key_event.key() == Qt.Key.Key_Space:
