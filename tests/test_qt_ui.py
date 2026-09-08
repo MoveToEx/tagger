@@ -61,6 +61,7 @@ from tagger.preview import (
 from tagger.review import ReviewDialog
 from tagger.settings import (
     JsonSettings,
+    OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
     PROXY_MODE_SETTING,
     PROXY_SETTING,
@@ -353,6 +354,37 @@ def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> No
     assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE
     assert get_scrolling_behavior(JsonSettings(settings_path)) == SCROLL_NAVIGATE
     assert applied == [SCROLL_NAVIGATE]
+
+
+def test_general_settings_stages_startup_folder_preference(
+    qtbot, tmp_path: Path
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = JsonSettings(settings_path)
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    assert dialog.startup_group.title() == "Startup"
+    assert dialog.open_recent_folder_checkbox.text() == (
+        "Open the most recent folder when the app starts"
+    )
+    assert not dialog.open_recent_folder_checkbox.isChecked()
+
+    dialog.open_recent_folder_checkbox.setChecked(True)
+
+    assert dialog.apply_button.isEnabled()
+    assert settings.value(
+        OPEN_RECENT_FOLDER_ON_STARTUP_SETTING, False, type=bool
+    ) is False
+    dialog.apply_button.click()
+
+    assert not dialog.apply_button.isEnabled()
+    assert settings.value(
+        OPEN_RECENT_FOLDER_ON_STARTUP_SETTING, type=bool
+    ) is True
+    assert JsonSettings(settings_path).value(
+        OPEN_RECENT_FOLDER_ON_STARTUP_SETTING, type=bool
+    ) is True
 
 
 def test_settings_select_controls_use_stable_geometry(
@@ -741,6 +773,33 @@ def test_file_menu_opens_recent_folder(
         str(current),
         str(recent_a),
     ]
+
+
+def test_main_window_opens_most_recent_folder_on_startup(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    recent_a = tmp_path / "recent-a"
+    recent_b = tmp_path / "recent-b"
+    for folder in (recent_a, recent_b):
+        folder.mkdir()
+        create_png(folder / "sample.png")
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(OPEN_RECENT_FOLDER_ON_STARTUP_SETTING, True)
+    settings.setValue(
+        RECENT_FOLDERS_SETTING,
+        [str(recent_a), str(recent_b)],
+    )
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.directory == recent_a
+    assert window.catalog.image_count == 1
+    assert window.windowTitle() == f"{recent_a.name} - Image Tagger"
+    qtbot.waitUntil(lambda: "32 × 24 px" in window.image_info_label.text())
 
 
 def test_file_menu_disables_missing_recent_folder(

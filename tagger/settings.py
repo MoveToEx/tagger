@@ -58,6 +58,9 @@ from .widgets import stabilize_widget_size
 UNDERSCORES_SETTING = "autocomplete/transform_underscores_to_spaces"
 PARENTHESES_SETTING = "autocomplete/escape_parentheses"
 SCROLLING_BEHAVIOR_SETTING = "general/scrolling_behavior"
+OPEN_RECENT_FOLDER_ON_STARTUP_SETTING = (
+    "general/open_recent_folder_on_startup"
+)
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 NO_PROXY = "none"
@@ -247,6 +250,14 @@ class SettingsDialog(QDialog):
             self._applied_proxy_url,
         ) = _proxy_preferences(self.settings)
         self._applied_scrolling_behavior = get_scrolling_behavior(self.settings)
+        self._applied_open_recent_folder_on_startup = cast(
+            bool,
+            self.settings.value(
+                OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
+                False,
+                type=bool,
+            ),
+        )
         self.setWindowTitle("Settings")
         self.resize(760, 520)
 
@@ -345,6 +356,17 @@ class SettingsDialog(QDialog):
 
     def _create_general_page(self) -> QWidget:
         page = QWidget()
+        self.startup_group = QGroupBox("Startup")
+        self.open_recent_folder_checkbox = QCheckBox(
+            "Open the most recent folder when the app starts"
+        )
+        self.open_recent_folder_checkbox.setChecked(
+            self._applied_open_recent_folder_on_startup
+        )
+        _stabilize_checkbox(self.open_recent_folder_checkbox)
+        startup_layout = QVBoxLayout(self.startup_group)
+        startup_layout.addWidget(self.open_recent_folder_checkbox)
+
         self.scrolling_behavior_group = QGroupBox("Scrolling behavior")
         self.scrolling_behavior_input = QComboBox()
         self.scrolling_behavior_input.addItem("Navigate", SCROLL_NAVIGATE)
@@ -362,8 +384,12 @@ class SettingsDialog(QDialog):
         group_layout = QFormLayout(self.scrolling_behavior_group)
         group_layout.addRow("Mouse wheel", self.scrolling_behavior_input)
         page_layout = QVBoxLayout(page)
+        page_layout.addWidget(self.startup_group)
         page_layout.addWidget(self.scrolling_behavior_group)
         page_layout.addStretch(1)
+        self.open_recent_folder_checkbox.toggled.connect(
+            self._settings_changed
+        )
         self.scrolling_behavior_input.currentIndexChanged.connect(
             self._settings_changed
         )
@@ -573,6 +599,8 @@ class SettingsDialog(QDialog):
     def _settings_changed(self, *_args: object) -> None:
         self.apply_button.setEnabled(
             self._scrolling_behavior() != self._applied_scrolling_behavior
+            or self.open_recent_folder_checkbox.isChecked()
+            != self._applied_open_recent_folder_on_startup
             or self._transform_options() != self._applied_transform_options
             or self._proxy_preferences()
             != (self._applied_proxy_mode, self._applied_proxy_url)
@@ -599,11 +627,18 @@ class SettingsDialog(QDialog):
 
     def _apply(self) -> None:
         scrolling_behavior = self._scrolling_behavior()
+        open_recent_folder_on_startup = (
+            self.open_recent_folder_checkbox.isChecked()
+        )
         underscores = self.underscores_checkbox.isChecked()
         parentheses = self.parentheses_checkbox.isChecked()
         proxy_mode, proxy_url = self._proxy_preferences()
         proxy = _resolved_proxy(proxy_mode, proxy_url)
         self.settings.setValue(SCROLLING_BEHAVIOR_SETTING, scrolling_behavior)
+        self.settings.setValue(
+            OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
+            open_recent_folder_on_startup,
+        )
         self.settings.setValue(UNDERSCORES_SETTING, underscores)
         self.settings.setValue(PARENTHESES_SETTING, parentheses)
         self.settings.setValue(PROXY_MODE_SETTING, proxy_mode)
@@ -620,6 +655,9 @@ class SettingsDialog(QDialog):
             self.models_page.set_proxy(proxy)
         self.scrolling_behavior_changed.emit(scrolling_behavior)
         self._applied_scrolling_behavior = scrolling_behavior
+        self._applied_open_recent_folder_on_startup = (
+            open_recent_folder_on_startup
+        )
         self._applied_transform_options = (underscores, parentheses)
         self._applied_proxy_mode = proxy_mode
         self._applied_proxy_url = proxy_url

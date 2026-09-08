@@ -66,6 +66,7 @@ from .global_search import GlobalTagSearchDialog
 from .preview import ImageView, PreviewLoader
 from .review import ReviewDialog
 from .settings import (
+    OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
     UNDERSCORES_SETTING,
     SettingsDialog,
@@ -229,6 +230,7 @@ class MainWindow(QMainWindow):
         self._create_actions()
         self._create_menus_and_toolbar()
         self._restore_settings()
+        self._open_recent_folder_on_startup()
         self._update_action_states()
 
     def _create_actions(self) -> None:
@@ -429,6 +431,19 @@ class MainWindow(QMainWindow):
             if folder.is_dir() and folder not in folders:
                 folders.append(folder)
         return folders[:MAX_RECENT_FOLDERS]
+
+    def _open_recent_folder_on_startup(self) -> None:
+        enabled = cast(
+            bool,
+            self.settings.value(
+                OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
+                False,
+                type=bool,
+            ),
+        )
+        folders = self._recent_folders() if enabled else []
+        if folders:
+            self._load_directory(folders[0], show_issues=True)
 
     def _record_recent_folder(self, directory: Path) -> None:
         folders = [
