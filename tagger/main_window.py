@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
         self.image_list.customContextMenuRequested.connect(
             self._show_image_context_menu
         )
+        self.image_list.installEventFilter(self)
         self.image_list.selectionModel().currentChanged.connect(
             self._current_image_changed
         )
@@ -448,7 +449,8 @@ class MainWindow(QMainWindow):
         }
 
     def open_folder(self) -> None:
-        start = str(self.settings.value("last_directory", "", type=str))
+        recent_folders = self._recent_folders()
+        start = str(recent_folders[0]) if recent_folders else ""
         selected = QFileDialog.getExistingDirectory(
             self, "Open Image Folder", start
         )
@@ -496,7 +498,6 @@ class MainWindow(QMainWindow):
             RECENT_FOLDERS_SETTING,
             [str(folder) for folder in folders[:MAX_RECENT_FOLDERS]],
         )
-        self.settings.setValue("last_directory", str(directory))
         self.open_recent_action.setEnabled(True)
 
     def _update_recent_folder_menu(self) -> None:
@@ -823,7 +824,7 @@ class MainWindow(QMainWindow):
             f"Image: {entry.image_path.name}\n"
             f"Tag: {entry.tag_path.name}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -1012,6 +1013,9 @@ class MainWindow(QMainWindow):
 
     @override
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.image_list and event.type() == QEvent.Type.KeyPress:
+            if self._handle_image_catalog_key_press(cast(QKeyEvent, event)):
+                return True
         if watched is self.search_input and event.type() == QEvent.Type.KeyPress:
             key_event = cast(QKeyEvent, event)
             if key_event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
@@ -1023,6 +1027,22 @@ class MainWindow(QMainWindow):
                 self._find_tag(direction)
                 return True
         return super().eventFilter(watched, event)
+
+    def _handle_image_catalog_key_press(self, event: QKeyEvent) -> bool:
+        current_index = self.image_list.currentIndex()
+        if (
+            event.modifiers() != Qt.KeyboardModifier.NoModifier
+            or not self.image_list.selectionModel().isSelected(current_index)
+            or self._current_entry() is None
+        ):
+            return False
+        if event.key() == Qt.Key.Key_Delete:
+            self._delete_current_image_and_tag()
+            return True
+        if event.key() == Qt.Key.Key_F2:
+            self._rename_current_image_and_tag()
+            return True
+        return False
 
     def _find_tag(self, direction: int = 1) -> None:
         pattern = self.search_input.text().strip()

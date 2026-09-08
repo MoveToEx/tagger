@@ -801,6 +801,35 @@ def test_file_menu_opens_recent_folder(
     ]
 
 
+def test_open_folder_uses_most_recent_folder(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    recent = tmp_path / "recent"
+    recent.mkdir()
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(RECENT_FOLDERS_SETTING, [str(recent)])
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+    starts: list[str] = []
+
+    def get_existing_directory(_parent, _title: str, start: str) -> str:
+        starts.append(start)
+        return ""
+
+    monkeypatch.setattr(
+        main_window_module.QFileDialog,
+        "getExistingDirectory",
+        get_existing_directory,
+    )
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.open_folder()
+
+    assert starts == [str(recent)]
+
+
 def test_main_window_opens_most_recent_folder_on_startup(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
@@ -1335,6 +1364,109 @@ def test_image_context_menu_renames_selected_image_and_tag(
     assert "Renamed pair to renamed.png and renamed.txt" in (
         window.statusBar().currentMessage()
     )
+
+
+def test_image_catalog_f2_renames_selected_image(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        lambda *_args: ("renamed", True),
+    )
+
+    window.image_list.setFocus()
+    qtbot.keyClick(window.image_list, Qt.Key.Key_F2)
+
+    assert not image_path.exists()
+    assert not tag_path.exists()
+    assert (tmp_path / "renamed.png").exists()
+    assert (tmp_path / "renamed.txt").read_text(encoding="utf-8") == "cat\n"
+
+
+def test_image_catalog_delete_confirms_and_deletes_selected_image(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    prompts: list[str] = []
+    dialog_options: list[
+        tuple[QMessageBox.StandardButton, QMessageBox.StandardButton]
+    ] = []
+
+    def confirm_delete(
+        _parent,
+        _title: str,
+        message: str,
+        buttons: QMessageBox.StandardButton,
+        default_button: QMessageBox.StandardButton,
+    ) -> QMessageBox.StandardButton:
+        prompts.append(message)
+        dialog_options.append((buttons, default_button))
+        return QMessageBox.StandardButton.Yes
+
+    def fake_move_to_trash(path: Path) -> bool:
+        path.unlink()
+        return True
+
+    monkeypatch.setattr(QMessageBox, "question", confirm_delete)
+    monkeypatch.setattr(main_window_module, "move_to_trash", fake_move_to_trash)
+
+    window.image_list.setFocus()
+    qtbot.keyClick(window.image_list, Qt.Key.Key_Delete)
+
+    assert len(prompts) == 1
+    assert "sample.png" in prompts[0]
+    assert "sample.txt" in prompts[0]
+    assert dialog_options == [
+        (
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+    ]
+    assert not image_path.exists()
+    assert not tag_path.exists()
+
+
+def test_image_catalog_keys_require_selected_image(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    create_png(tmp_path / "sample.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    window.image_list.clearSelection()
+    assert window.image_list.currentIndex().isValid()
+    calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        "_rename_current_image_and_tag",
+        lambda: calls.append("rename"),
+    )
+    monkeypatch.setattr(
+        window,
+        "_delete_current_image_and_tag",
+        lambda: calls.append("delete"),
+    )
+
+    window.image_list.setFocus()
+    qtbot.keyClick(window.image_list, Qt.Key.Key_F2)
+    qtbot.keyClick(window.image_list, Qt.Key.Key_Delete)
+
+    assert calls == []
 
 
 def test_image_context_menu_reveals_selected_image_in_explorer(
