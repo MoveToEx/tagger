@@ -234,6 +234,8 @@ class TagCompleter(QObject):
         super().__init__(line_edit)
         self._line_edit = line_edit
         self._library = library
+        self._completing = False
+        self._suppress_focus_refresh = False
         self._model = QStringListModel(self)
         self._popup = _TagCompletionPopup(line_edit.window())
         self._popup.setModel(self._model)
@@ -267,10 +269,15 @@ class TagCompleter(QObject):
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if obj is self._line_edit:
             if event.type() == QEvent.Type.FocusIn:
+                if self._suppress_focus_refresh:
+                    self._suppress_focus_refresh = False
+                    self._popup.hide()
+                    return False
                 if not self._popup.isVisible():
                     self.refresh()
                 return False
             if event.type() == QEvent.Type.FocusOut:
+                self._suppress_focus_refresh = False
                 if not self._cursor_over_popup():
                     self._popup.hide()
                 return False
@@ -370,16 +377,21 @@ class TagCompleter(QObject):
 
     def _insert_completion(self, index) -> None:
         updated = self.pathFromIndex(index)
-        self._line_edit.setText(updated)
-        self._line_edit.setCursorPosition(len(self._line_edit.text()))
-        self._popup.hide()
+        self._completing = True
+        try:
+            self._line_edit.setText(updated)
+            self._line_edit.setCursorPosition(len(self._line_edit.text()))
+        finally:
+            self._completing = False
+            self._suppress_focus_refresh = True
+            self._popup.hide()
 
     def refresh(self, text: str | None = None) -> None:
         value = self._line_edit.text() if text is None else text
         suggestions = self._library.suggestions(value)
         self._model.setStringList(suggestions)
         self._clear_popup_selection()
-        if suggestions and self._line_edit.hasFocus():
+        if suggestions and self._line_edit.hasFocus() and not self._completing:
             self._show_popup()
         else:
             self._popup.hide()

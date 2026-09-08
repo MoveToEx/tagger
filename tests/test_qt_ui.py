@@ -403,6 +403,7 @@ def test_tag_autocomplete_double_click_inserts_tag(qtbot, tmp_path: Path) -> Non
     )
 
     assert line_edit.text() == "red_hair"
+    qtbot.wait(100)
     assert not completer.popup().isVisible()
 
 
