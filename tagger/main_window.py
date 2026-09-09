@@ -74,6 +74,7 @@ from .settings import (
     MANUAL_DELETION_BEHAVIOR_SETTING,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
+    TIDY_DELETION_BEHAVIOR_SETTING,
     UNDERSCORES_SETTING,
     SettingsDialog,
     create_app_settings,
@@ -85,6 +86,7 @@ from .storage import (
     BatchPreflightError,
     ExternalChangeError,
     WriteRequest,
+    find_unrecognized_files,
     rename_image_pair,
     scan_folder,
     write_tags_atomic,
@@ -255,6 +257,12 @@ class MainWindow(QMainWindow):
         self.rescan_action.setShortcut(QKeySequence("F5"))
         self.rescan_action.triggered.connect(self.rescan)
 
+        self.tidy_action = QAction("Tidy", self)
+        self.tidy_action.setToolTip(
+            "Delete files not recognized as images or tag sidecars."
+        )
+        self.tidy_action.triggered.connect(self._tidy_folder)
+
         self.archive_action = QAction("Archive...", self)
         self.archive_action.triggered.connect(self._archive_folder)
 
@@ -375,6 +383,7 @@ class MainWindow(QMainWindow):
         self._update_recent_folder_menu()
         file_menu.addAction(self.close_folder_action)
         file_menu.addAction(self.rescan_action)
+        file_menu.addAction(self.tidy_action)
         file_menu.addSeparator()
         file_menu.addAction(self.archive_action)
         file_menu.addSeparator()
@@ -572,6 +581,90 @@ class MainWindow(QMainWindow):
             preferred_image=current.image_path if current else None,
             show_issues=True,
         )
+
+    def _tidy_folder(self) -> None:
+        directory = self.directory
+        if directory is None:
+            return
+
+        try:
+            candidates = find_unrecognized_files(
+                directory, self._supported_extensions()
+            )
+        except OSError as exc:
+            QMessageBox.critical(self, "Could Not Tidy Folder", str(exc))
+            return
+
+        if not candidates:
+            self.statusBar().showMessage("Folder is already tidy.", 4000)
+            return
+
+        deletion_behavior = get_deletion_behavior(
+            self.settings, TIDY_DELETION_BEHAVIOR_SETTING
+        )
+        deleting_permanently = deletion_behavior == UNLINK
+        count = len(candidates)
+        answer = QMessageBox.question(
+            self,
+            (
+                "Permanently Delete Unrecognized Files?"
+                if deleting_permanently
+                else "Delete Unrecognized Files?"
+            ),
+            (
+                f"Permanently delete {count} unrecognized file(s)?\n\n"
+                "This cannot be undone."
+                if deleting_permanently
+                else (
+                    f"Move {count} unrecognized file(s) to the system "
+                    "Recycle Bin?"
+                )
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted: list[Path] = []
+        failures: list[str] = []
+        for path in candidates:
+            try:
+                succeeded = delete_file(path, deletion_behavior)
+            except OSError as exc:
+                failures.append(f"Could not delete {path.name}: {exc}")
+                continue
+            if succeeded:
+                deleted.append(path)
+            else:
+                destination = (
+                    "permanently" if deleting_permanently else "to Recycle Bin"
+                )
+                failures.append(f"Could not delete {path.name} {destination}.")
+
+        if deleted:
+            current = self._current_entry()
+            self._load_directory(
+                directory,
+                preferred_image=current.image_path if current else None,
+                show_issues=False,
+            )
+
+        if failures:
+            QMessageBox.warning(
+                self,
+                "Could Not Tidy All Files",
+                "\n".join(failures),
+            )
+        elif deleted:
+            action = (
+                "Permanently deleted"
+                if deleting_permanently
+                else "Moved to Recycle Bin"
+            )
+            self.statusBar().showMessage(
+                f"{action} {len(deleted)} unrecognized file(s).", 4000
+            )
 
     def _archive_folder(self) -> None:
         if not self.catalog.entries:
@@ -1486,6 +1579,7 @@ class MainWindow(QMainWindow):
         has_directory = self.directory is not None
         self.close_folder_action.setEnabled(has_directory)
         self.rescan_action.setEnabled(has_directory)
+        self.tidy_action.setEnabled(has_directory)
         self.archive_action.setEnabled(
             count > 0 and self._archive_dialog is None
         )

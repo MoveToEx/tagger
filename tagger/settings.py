@@ -66,6 +66,7 @@ DELETE_FILTER_DELETION_BEHAVIOR_SETTING = (
     "general/delete_filter_deletion_behavior"
 )
 MANUAL_DELETION_BEHAVIOR_SETTING = "general/manual_deletion_behavior"
+TIDY_DELETION_BEHAVIOR_SETTING = "general/tidy_deletion_behavior"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 NO_PROXY = "none"
@@ -277,6 +278,9 @@ class SettingsDialog(QDialog):
             get_deletion_behavior(
                 self.settings, MANUAL_DELETION_BEHAVIOR_SETTING
             ),
+            get_deletion_behavior(
+                self.settings, TIDY_DELETION_BEHAVIOR_SETTING
+            ),
         )
         self.setWindowTitle("Settings")
         self.resize(760, 520)
@@ -429,11 +433,24 @@ class SettingsDialog(QDialog):
         )
         stabilize_widget_size(self.manual_deletion_input)
 
+        self.tidy_deletion_input = QComboBox()
+        self.tidy_deletion_input.addItem(
+            "System recycle bin", SYSTEM_RECYCLE_BIN
+        )
+        self.tidy_deletion_input.addItem("Unlink", UNLINK)
+        self.tidy_deletion_input.setCurrentIndex(
+            self.tidy_deletion_input.findData(
+                self._applied_deletion_behaviors[2]
+            )
+        )
+        stabilize_widget_size(self.tidy_deletion_input)
+
         deletion_layout = QFormLayout(self.deletion_behavior_group)
         deletion_layout.addRow(
             "Delete filter", self.delete_filter_deletion_input
         )
         deletion_layout.addRow("Manual delete", self.manual_deletion_input)
+        deletion_layout.addRow("Tidy", self.tidy_deletion_input)
 
         page_layout = QVBoxLayout(page)
         page_layout.addWidget(self.startup_group)
@@ -450,6 +467,9 @@ class SettingsDialog(QDialog):
             self._settings_changed
         )
         self.manual_deletion_input.currentIndexChanged.connect(
+            self._settings_changed
+        )
+        self.tidy_deletion_input.currentIndexChanged.connect(
             self._settings_changed
         )
         return page
@@ -677,14 +697,16 @@ class SettingsDialog(QDialog):
         behavior = self.scrolling_behavior_input.currentData()
         return behavior if isinstance(behavior, str) else SCROLL_PAN
 
-    def _deletion_behaviors(self) -> tuple[str, str]:
+    def _deletion_behaviors(self) -> tuple[str, str, str]:
         delete_filter = self.delete_filter_deletion_input.currentData()
         manual = self.manual_deletion_input.currentData()
+        tidy = self.tidy_deletion_input.currentData()
         return (
             delete_filter
             if isinstance(delete_filter, str)
             else SYSTEM_RECYCLE_BIN,
             manual if isinstance(manual, str) else SYSTEM_RECYCLE_BIN,
+            tidy if isinstance(tidy, str) else SYSTEM_RECYCLE_BIN,
         )
 
     def _proxy_preferences(self) -> tuple[str, str]:
@@ -720,6 +742,10 @@ class SettingsDialog(QDialog):
         self.settings.setValue(
             MANUAL_DELETION_BEHAVIOR_SETTING,
             deletion_behaviors[1],
+        )
+        self.settings.setValue(
+            TIDY_DELETION_BEHAVIOR_SETTING,
+            deletion_behaviors[2],
         )
         self.settings.setValue(PROXY_MODE_SETTING, proxy_mode)
         self.settings.setValue(PROXY_SETTING, proxy_url)

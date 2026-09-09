@@ -210,6 +210,35 @@ def scan_folder(directory: Path, supported_extensions: Iterable[str]) -> ScanRes
     return result
 
 
+def find_unrecognized_files(
+    directory: Path, supported_extensions: Iterable[str]
+) -> list[Path]:
+    """Return files not understood as image/tag files in *directory*.
+
+    Recognition follows :func:`scan_folder`, including its handling of
+    conflicting sidecars and duplicate image stems. This keeps cleanup aligned
+    with the files the catalog can actually use.
+    """
+    directory = Path(directory)
+    result = scan_folder(directory, supported_extensions)
+    files = [path for path in directory.rglob("*") if path.is_file()]
+    recognized = {
+        path
+        for entry in result.entries
+        for path in (entry.image_path, entry.tag_path)
+    }
+
+    return sorted(
+        (path for path in files if path not in recognized),
+        key=lambda path: (
+            str(path.parent.relative_to(directory)).casefold(),
+            str(path.parent.relative_to(directory)),
+            path.name.casefold(),
+            path.name,
+        ),
+    )
+
+
 def rename_image_pair(
     entry: ImageEntry, new_stem: str
 ) -> tuple[Path, Path]:

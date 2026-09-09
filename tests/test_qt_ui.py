@@ -79,6 +79,7 @@ from tagger.settings import (
     PROXY_SETTING,
     SCROLLING_BEHAVIOR_SETTING,
     SettingsDialog,
+    TIDY_DELETION_BEHAVIOR_SETTING,
     UNDERSCORES_SETTING,
     get_deletion_behavior,
     get_scrolling_behavior,
@@ -477,6 +478,36 @@ def test_general_settings_stages_deletion_behaviors(
     assert not dialog.apply_button.isEnabled()
 
 
+def test_general_settings_stages_tidy_deletion_behavior(
+    qtbot, tmp_path: Path
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = JsonSettings(settings_path)
+    settings.setValue(TIDY_DELETION_BEHAVIOR_SETTING, UNLINK)
+    settings.sync()
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    assert dialog.tidy_deletion_input.currentData() == UNLINK
+    assert [
+        dialog.tidy_deletion_input.itemText(index)
+        for index in range(dialog.tidy_deletion_input.count())
+    ] == ["System recycle bin", "Unlink"]
+
+    dialog.tidy_deletion_input.setCurrentIndex(
+        dialog.tidy_deletion_input.findData(SYSTEM_RECYCLE_BIN)
+    )
+    assert dialog.apply_button.isEnabled()
+    dialog.apply_button.click()
+
+    assert (
+        get_deletion_behavior(
+            JsonSettings(settings_path), TIDY_DELETION_BEHAVIOR_SETTING
+        )
+        == SYSTEM_RECYCLE_BIN
+    )
+
+
 def test_settings_select_controls_use_stable_geometry(
     qtbot, tmp_path: Path
 ) -> None:
@@ -491,6 +522,7 @@ def test_settings_select_controls_use_stable_geometry(
         settings_dialog.scrolling_behavior_input,
         settings_dialog.delete_filter_deletion_input,
         settings_dialog.manual_deletion_input,
+        settings_dialog.tidy_deletion_input,
         model_dialog.download_location_input,
     ):
         assert_stable_widget_size(combo_box)
@@ -882,6 +914,84 @@ def test_file_menu_opens_recent_folder(
         str(current),
         str(recent_a),
     ]
+
+
+def test_file_menu_tidy_deletes_unrecognized_files(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    unknown = tmp_path / "notes.json"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    unknown.write_text("{}", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window._load_directory(tmp_path, show_issues=False)
+    assert window.tidy_action.isEnabled()
+    file_menu = next(
+        menu
+        for menu in window.menuBar().findChildren(QMenu)
+        if menu.title() == "&File"
+    )
+    assert window.tidy_action in file_menu.actions()
+
+    prompts: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, message, *_args: (
+            prompts.append((title, message))
+            or QMessageBox.StandardButton.Yes
+        ),
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "delete_file",
+        lambda path, behavior: path.unlink() or True,
+    )
+
+    window.tidy_action.trigger()
+
+    assert not unknown.exists()
+    assert image_path.exists()
+    assert tag_path.exists()
+    assert prompts[0][0] == "Delete Unrecognized Files?"
+    assert "1 unrecognized file(s)" in prompts[0][1]
+
+
+def test_tidy_uses_unlink_setting(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    create_png(tmp_path / "sample.png")
+    unknown = tmp_path / "notes.json"
+    unknown.write_text("{}", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.settings.setValue(TIDY_DELETION_BEHAVIOR_SETTING, UNLINK)
+    window._load_directory(tmp_path, show_issues=False)
+    behaviors: list[str] = []
+
+    def fake_delete_file(path: Path, behavior: str) -> bool:
+        behaviors.append(behavior)
+        path.unlink()
+        return True
+
+    monkeypatch.setattr(main_window_module, "delete_file", fake_delete_file)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args: QMessageBox.StandardButton.Yes,
+    )
+
+    window._tidy_folder()
+
+    assert behaviors == [UNLINK]
+    assert not unknown.exists()
+    assert window.statusBar().currentMessage() == (
+        "Permanently deleted 1 unrecognized file(s)."
+    )
 
 
 def test_open_folder_uses_most_recent_folder(
@@ -2122,6 +2232,7 @@ def test_close_folder_empties_program_state(qtbot, tmp_path: Path) -> None:
     assert window.statusBar().currentMessage() == ""
     assert not window.close_folder_action.isEnabled()
     assert not window.rescan_action.isEnabled()
+    assert not window.tidy_action.isEnabled()
     assert not window.archive_action.isEnabled()
     assert not window.search_input.isEnabled()
     assert not window.tag_input.isEnabled()

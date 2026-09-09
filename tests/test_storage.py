@@ -11,6 +11,7 @@ from tagger.storage import (
     BatchPreflightError,
     ExternalChangeError,
     WriteRequest,
+    find_unrecognized_files,
     rename_image_pair,
     scan_folder,
     write_tags_atomic,
@@ -23,6 +24,28 @@ IMAGE_EXTENSIONS = {".jpg", ".png"}
 
 def touch_image(path: Path) -> None:
     path.write_bytes(b"not decoded by scanner")
+
+
+def test_find_unrecognized_files_keeps_supported_images_and_sidecars(
+    tmp_path: Path,
+) -> None:
+    touch_image(tmp_path / "sample.JPG")
+    (tmp_path / "sample.txt").write_text("cat\n", encoding="utf-8")
+    (tmp_path / "sample.JPG.txt").write_text("cat\n", encoding="utf-8")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    touch_image(nested / "child.png")
+    (nested / "child.txt").write_text("dog\n", encoding="utf-8")
+    unknown = tmp_path / "notes.json"
+    unknown.write_text("{}", encoding="utf-8")
+    nested_unknown = nested / "preview.webp.txt"
+    nested_unknown.write_text("preview", encoding="utf-8")
+
+    assert find_unrecognized_files(tmp_path, IMAGE_EXTENSIONS) == [
+        unknown,
+        tmp_path / "sample.JPG.txt",
+        nested_unknown,
+    ]
 
 
 def test_scan_creates_sidecars_for_nested_images(tmp_path: Path) -> None:
