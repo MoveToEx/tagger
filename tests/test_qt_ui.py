@@ -3337,6 +3337,17 @@ def test_bulk_operation_runs_code_and_skips_unchanged_images(
     assert dialog.original_tags_input.maximumHeight() == 100
     assert dialog.new_tags_input.maximumHeight() == 100
     assert dialog.changes_text.toPlainText() == "[+] new"
+    assert dialog.apply_change_checkbox.text() == "Apply change"
+    assert dialog.apply_change_checkbox.isChecked()
+    assert dialog.apply_change_checkbox.styleSheet() == (
+        "QCheckBox::indicator { width: 12px; height: 12px; }"
+    )
+    assert dialog.discard_button.text() == "Back"
+    assert dialog.apply_all_button.text() == "Apply All"
+    assert dialog.previous_button.text() == "Previous"
+    assert dialog.next_button.text() == "Next"
+    assert not dialog.previous_button.isEnabled()
+    assert not dialog.next_button.isEnabled()
 
 
 def test_bulk_operation_reports_invalid_process_return(qtbot, tmp_path: Path) -> None:
@@ -3362,7 +3373,7 @@ def test_bulk_operation_reports_invalid_process_return(qtbot, tmp_path: Path) ->
     assert "must return set[str]" in dialog.code_error_label.text()
 
 
-def test_bulk_operation_confirms_and_skips_with_shortcuts(
+def test_bulk_operation_updates_decisions_while_navigation_only_moves(
     qtbot, tmp_path: Path
 ) -> None:
     for name, tags in {"first.png": "cat\n", "second.png": "dog\n"}.items():
@@ -3383,16 +3394,61 @@ def test_bulk_operation_confirms_and_skips_with_shortcuts(
     )
     dialog._run_code()
     dialog.new_tags_input.setPlainText("cat, edited")
+    dialog.apply_change_checkbox.setChecked(False)
 
-    qtbot.keyClick(dialog.confirm_button, Qt.Key.Key_Return)
+    assert not dialog._decisions[0].apply_change
+    assert dialog._decisions[0].result_tags == ("cat", "edited")
+    dialog.next_button.click()
     assert dialog.current_change.entry.image_path.name == "second.png"
-    qtbot.keyClick(dialog.confirm_button, Qt.Key.Key_Space)
+    assert dialog.previous_button.isEnabled()
+    assert not dialog.next_button.isEnabled()
+    assert dialog.result() == 0
+    assert (tmp_path / "first.txt").read_text(encoding="utf-8") == "cat\n"
+    assert (tmp_path / "second.txt").read_text(encoding="utf-8") == "dog\n"
+
+    dialog.previous_button.click()
+
+    assert dialog.current_change.entry.image_path.name == "first.png"
+    assert dialog.new_tags_input.toPlainText() == "cat, edited"
+    assert not dialog.apply_change_checkbox.isChecked()
+    assert not dialog.previous_button.isEnabled()
+    assert dialog.next_button.isEnabled()
+
+
+def test_bulk_operation_apply_all_ignores_apply_decisions(
+    qtbot, tmp_path: Path
+) -> None:
+    for name, tags in {"first.png": "cat\n", "second.png": "dog\n"}.items():
+        create_png(tmp_path / name)
+        (tmp_path / f"{Path(name).stem}.txt").write_text(tags, encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    dialog = BulkOperationDialog(
+        window.catalog.entries,
+        root_directory=tmp_path,
+    )
+    qtbot.addWidget(dialog)
+    dialog._show_code_page()
+    dialog.code_input.setPlainText(
+        "def process(fn: str, tags: set[str]) -> set[str]:\n"
+        "    return tags | {'processed'}\n"
+    )
+    dialog._run_code()
+    dialog.new_tags_input.setPlainText("cat, edited")
+    dialog.apply_change_checkbox.setChecked(False)
+    dialog.next_button.click()
+    dialog.apply_change_checkbox.setChecked(False)
+
+    dialog.apply_all_button.click()
 
     assert dialog.result() == BulkOperationDialog.DialogCode.Accepted
     assert (tmp_path / "first.txt").read_text(encoding="utf-8") == (
         "cat, edited\n"
     )
-    assert (tmp_path / "second.txt").read_text(encoding="utf-8") == "dog\n"
+    assert (tmp_path / "second.txt").read_text(encoding="utf-8") == (
+        "dog, processed\n"
+    )
 
 
 def test_bulk_operation_discard_returns_to_code_without_writing(
@@ -3415,13 +3471,12 @@ def test_bulk_operation_discard_returns_to_code_without_writing(
         "    return tags | {'processed'}\n"
     )
     dialog._run_code()
-    dialog._confirm_current()
-    assert dialog._approved
+    assert dialog._decisions
 
     dialog.discard_button.click()
 
     assert dialog.pages.currentWidget() is dialog.code_page
-    assert not dialog._approved
+    assert not dialog._decisions
     assert (tmp_path / "first.txt").read_text(encoding="utf-8") == "cat\n"
     assert (tmp_path / "second.txt").read_text(encoding="utf-8") == "cat\n"
 

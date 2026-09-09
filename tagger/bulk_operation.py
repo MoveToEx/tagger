@@ -5,16 +5,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast, override
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import (
     QColor,
     QCloseEvent,
     QFont,
-    QKeyEvent,
     QTextCharFormat,
     QTextCursor,
 )
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -54,6 +54,12 @@ class BulkChange:
     proposed_tags: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class BulkDecision:
+    apply_change: bool
+    result_tags: tuple[str, ...]
+
+
 def _folder_ancestors(path: Path) -> list[Path]:
     if path == Path("."):
         return []
@@ -78,8 +84,8 @@ class BulkOperationDialog(QDialog):
         self._updating_checks = False
         self._changes: list[BulkChange] = []
         self._current_index = 0
-        self._approved: dict[int, list[str]] = {}
-        self._decided: set[int] = set()
+        self._decisions: dict[int, BulkDecision] = {}
+        self._loading_decision = False
         self._allow_close = False
         self.commit_result: BatchCommitResult | None = None
 
@@ -99,7 +105,6 @@ class BulkOperationDialog(QDialog):
 
         self._populate_tree()
         self._update_selection()
-        self._install_approval_key_filter()
 
     def _create_selection_page(self) -> QWidget:
         page = QWidget()
@@ -182,10 +187,16 @@ class BulkOperationDialog(QDialog):
         self.new_tags_input = QPlainTextEdit()
         self.new_tags_input.setPlaceholderText("Comma-separated tags")
         self.new_tags_input.setMaximumHeight(100)
-        self.new_tags_input.textChanged.connect(self._update_changes_text)
+        self.new_tags_input.textChanged.connect(self._decision_changed)
         self.new_tags_completer = attach_plain_text_tag_completer(
             self.new_tags_input, self._tag_library
         )
+        self.apply_change_checkbox = QCheckBox("Apply change")
+        self.apply_change_checkbox.setChecked(True)
+        self.apply_change_checkbox.setStyleSheet(
+            "QCheckBox::indicator { width: 12px; height: 12px; }"
+        )
+        self.apply_change_checkbox.toggled.connect(self._decision_changed)
 
         details_layout = QVBoxLayout()
         details_layout.setContentsMargins(12, 0, 0, 0)
@@ -194,6 +205,7 @@ class BulkOperationDialog(QDialog):
         details_layout.addWidget(self.original_tags_input)
         details_layout.addWidget(QLabel("Tag changes"))
         details_layout.addWidget(self.changes_text, 1)
+        details_layout.addWidget(self.apply_change_checkbox)
         details_layout.addWidget(QLabel("Result tags"))
         details_layout.addWidget(self.new_tags_input)
         details_panel = QWidget()
@@ -208,16 +220,19 @@ class BulkOperationDialog(QDialog):
 
         self.discard_button = QPushButton("Back")
         self.discard_button.clicked.connect(self._discard_and_edit_code)
-        self.skip_button = QPushButton("Skip")
-        self.skip_button.clicked.connect(self._skip_current)
-        self.confirm_button = QPushButton("Confirm")
-        self.confirm_button.clicked.connect(self._confirm_current)
+        self.apply_all_button = QPushButton("Apply All")
+        self.apply_all_button.clicked.connect(self._apply_all)
+        self.previous_button = QPushButton("Previous")
+        self.previous_button.clicked.connect(self._previous)
+        self.next_button = QPushButton("Next")
+        self.next_button.clicked.connect(self._next)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.discard_button)
+        buttons.addWidget(self.apply_all_button)
         buttons.addStretch(1)
-        buttons.addWidget(self.skip_button)
-        buttons.addWidget(self.confirm_button)
+        buttons.addWidget(self.previous_button)
+        buttons.addWidget(self.next_button)
 
         layout = QVBoxLayout(page)
         layout.addWidget(self.progress_label)
@@ -225,26 +240,6 @@ class BulkOperationDialog(QDialog):
         layout.addWidget(self.approval_splitter, 1)
         layout.addLayout(buttons)
         return page
-
-    def _install_approval_key_filter(self) -> None:
-        self.approval_page.installEventFilter(self)
-        for widget in self.approval_page.findChildren(QWidget):
-            widget.installEventFilter(self)
-
-    @override
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if (
-            self.pages.currentWidget() is self.approval_page
-            and event.type() == QEvent.Type.KeyPress
-        ):
-            key_event = cast(QKeyEvent, event)
-            if key_event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
-                self._confirm_current()
-                return True
-            if key_event.key() == Qt.Key.Key_Space:
-                self._skip_current()
-                return True
-        return super().eventFilter(watched, event)
 
     def _populate_tree(self) -> None:
         self.folder_tree.clear()
@@ -411,8 +406,10 @@ class BulkOperationDialog(QDialog):
 
         self._changes = changes
         self._current_index = 0
-        self._approved.clear()
-        self._decided.clear()
+        self._decisions = {
+            index: BulkDecision(True, change.proposed_tags)
+            for index, change in enumerate(changes)
+        }
         self.pages.setCurrentWidget(self.approval_page)
         self._load_current_change()
 
@@ -422,18 +419,31 @@ class BulkOperationDialog(QDialog):
 
     def _load_current_change(self) -> None:
         change = self.current_change
+        decision = self._decisions[self._current_index]
+        applied_count = sum(
+            item.apply_change for item in self._decisions.values()
+        )
         self.progress_label.setText(
             f"Image {self._current_index + 1} of {len(self._changes)}"
-            f" | Confirmed {len(self._approved)}"
-            f" | Skipped {len(self._decided) - len(self._approved)}"
+            f" | Apply {applied_count}"
+            f" | Skip {len(self._decisions) - applied_count}"
         )
         self.path_label.setText(str(change.entry.image_path))
         self.original_tags_input.setPlainText(", ".join(change.entry.tags))
-        self.new_tags_input.setPlainText(", ".join(change.proposed_tags))
+        self._loading_decision = True
+        try:
+            self.apply_change_checkbox.setChecked(decision.apply_change)
+            self.new_tags_input.setPlainText(", ".join(decision.result_tags))
+        finally:
+            self._loading_decision = False
         self.image_view.clear_image("Loading image...")
         self.preview_loader.load(change.entry.image_path)
-        self.confirm_button.setFocus()
         self._update_changes_text()
+        self._update_navigation_buttons()
+        if self.next_button.isEnabled():
+            self.next_button.setFocus()
+        else:
+            self.apply_all_button.setFocus()
 
     def _current_new_tags(self) -> list[str]:
         return normalize_tags(parse_tags(self.new_tags_input.toPlainText()))
@@ -460,39 +470,56 @@ class BulkOperationDialog(QDialog):
                     cursor.insertBlock()
                 cursor.insertText(f"{prefix} {tag}", format_)
 
-    def _confirm_current(self) -> None:
-        if self.pages.currentWidget() is not self.approval_page:
+    def _decision_changed(self, *_args) -> None:
+        if self._loading_decision or not self._changes:
             return
-        tags = self._current_new_tags()
-        self._decided.add(self._current_index)
-        if set(tags) == set(self.current_change.entry.tags):
-            self._approved.pop(self._current_index, None)
-        else:
-            self._approved[self._current_index] = tags
-        self._advance_or_commit()
+        self._decisions[self._current_index] = BulkDecision(
+            self.apply_change_checkbox.isChecked(),
+            tuple(self._current_new_tags()),
+        )
+        self._update_changes_text()
+        self._update_progress()
 
-    def _skip_current(self) -> None:
-        if self.pages.currentWidget() is not self.approval_page:
-            return
-        self._decided.add(self._current_index)
-        self._approved.pop(self._current_index, None)
-        self._advance_or_commit()
+    def _update_progress(self) -> None:
+        applied_count = sum(
+            decision.apply_change for decision in self._decisions.values()
+        )
+        self.progress_label.setText(
+            f"Image {self._current_index + 1} of {len(self._changes)}"
+            f" | Apply {applied_count}"
+            f" | Skip {len(self._decisions) - applied_count}"
+        )
 
-    def _advance_or_commit(self) -> None:
+    def _update_navigation_buttons(self) -> None:
+        self.previous_button.setEnabled(self._current_index > 0)
+        self.next_button.setEnabled(
+            self._current_index + 1 < len(self._changes)
+        )
+
+    def _previous(self) -> None:
+        if self._current_index > 0:
+            self._current_index -= 1
+            self._load_current_change()
+
+    def _next(self) -> None:
         if self._current_index + 1 < len(self._changes):
             self._current_index += 1
             self._load_current_change()
-            return
-        self._commit()
 
-    def _commit(self) -> None:
+    def _apply_all(self) -> None:
+        if self.pages.currentWidget() is not self.approval_page:
+            return
+        self._commit(ignore_decisions=True)
+
+    def _commit(self, *, ignore_decisions: bool = False) -> None:
         requests = [
             WriteRequest(
                 path=self._changes[index].entry.tag_path,
-                tags=tags,
+                tags=list(decision.result_tags),
                 expected_bytes=self._changes[index].entry.source_bytes,
             )
-            for index, tags in sorted(self._approved.items())
+            for index, decision in sorted(self._decisions.items())
+            if ignore_decisions or decision.apply_change
         ]
         if not requests:
             self.commit_result = BatchCommitResult([], {})
@@ -522,8 +549,7 @@ class BulkOperationDialog(QDialog):
     def _discard_and_edit_code(self) -> None:
         self.preview_loader.clear()
         self._changes.clear()
-        self._approved.clear()
-        self._decided.clear()
+        self._decisions.clear()
         self._current_index = 0
         self.pages.setCurrentWidget(self.code_page)
         self.code_input.setFocus()
