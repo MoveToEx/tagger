@@ -1325,14 +1325,7 @@ class MainWindow(QMainWindow):
             self.image_info_label.setToolTip("")
             return
 
-        display_path = entry.image_path.name
-        if self.directory is not None:
-            try:
-                display_path = str(entry.image_path.relative_to(self.directory))
-            except ValueError:
-                pass
-
-        details = [display_path]
+        details = []
         if image is not None and not image.isNull():
             details.append(f"{image.width()} × {image.height()} px")
         elif error:

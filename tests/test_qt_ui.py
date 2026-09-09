@@ -876,7 +876,7 @@ def test_main_window_loads_folder_and_edits_current_tags(qtbot, tmp_path: Path) 
 
     qtbot.waitUntil(lambda: "32 × 24 px" in window.image_info_label.text())
     image_info = window.image_info_label.text()
-    assert "sample.png" in image_info
+    assert "sample.png" not in image_info
     assert "PNG" in image_info
     assert image_info.endswith(" B")
 
