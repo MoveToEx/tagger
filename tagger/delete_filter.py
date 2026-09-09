@@ -5,7 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast, override
 
-from PySide6.QtCore import QEvent, QObject, QSignalBlocker, Qt
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QSignalBlocker,
+    QThread,
+    Qt,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -13,6 +21,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -21,18 +30,203 @@ from PySide6.QtWidgets import (
 
 from .domain import ImageEntry
 from .preview import PreviewLoader
-from .trash import move_to_trash
+from .trash import SYSTEM_RECYCLE_BIN, UNLINK, delete_file
 
 
 @dataclass
 class DeleteFilterCommitResult:
     deleted_images: list[Path]
-    moved_files: list[Path]
+    deleted_files: list[Path]
     failures: dict[Path, str]
 
     @property
     def complete(self) -> bool:
         return not self.failures
+
+
+class _DeleteFilterWorker(QObject):
+    progress = Signal(int, int, str)
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        entries: list[ImageEntry],
+        file_deleter: Callable[[Path], bool],
+        preview_waiter: Callable[[], bool],
+        deletion_behavior: str,
+    ) -> None:
+        super().__init__()
+        self.entries = entries
+        self._file_deleter = file_deleter
+        self._preview_waiter = preview_waiter
+        self._deletion_behavior = deletion_behavior
+
+    @Slot()
+    def run(self) -> None:
+        total = len(self.entries) * 2
+        try:
+            self.progress.emit(
+                0, total, "Waiting for image previews..."
+            )
+            self._preview_waiter()
+
+            deleted_files: list[Path] = []
+            deleted_images: list[Path] = []
+            failures: dict[Path, str] = {}
+            completed = 0
+            deleting_permanently = self._deletion_behavior == UNLINK
+            for entry in self.entries:
+                action = (
+                    "Deleting permanently"
+                    if deleting_permanently
+                    else "Moving to Recycle Bin"
+                )
+                self.progress.emit(
+                    completed,
+                    total,
+                    f"{action}: {entry.image_path.name}",
+                )
+                image_moved = self._move_file(entry.image_path, failures)
+                if image_moved:
+                    deleted_files.append(entry.image_path)
+                    deleted_images.append(entry.image_path)
+                completed += 1
+
+                if image_moved and entry.tag_path.exists():
+                    self.progress.emit(
+                        completed,
+                        total,
+                        f"{action}: {entry.tag_path.name}",
+                    )
+                    if self._move_file(entry.tag_path, failures):
+                        deleted_files.append(entry.tag_path)
+                    tag_status = f"Deleted: {entry.tag_path.name}"
+                else:
+                    tag_status = f"Skipped {entry.tag_path.name}"
+                completed += 1
+                self.progress.emit(completed, total, tag_status)
+
+            self.completed.emit(
+                DeleteFilterCommitResult(
+                    deleted_images=deleted_images,
+                    deleted_files=deleted_files,
+                    failures=failures,
+                )
+            )
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+    def _move_file(
+        self, path: Path, failures: dict[Path, str]
+    ) -> bool:
+        try:
+            deleted = self._file_deleter(path)
+        except OSError as exc:
+            failures[path] = str(exc)
+            return False
+        if not deleted:
+            failures[path] = "Could not delete file."
+        return deleted
+
+
+class DeleteFilterProgressDialog(QDialog):
+    """Show progress while the delete filter commit runs in the background."""
+
+    def __init__(
+        self,
+        entries: list[ImageEntry],
+        file_deleter: Callable[[Path], bool],
+        preview_waiter: Callable[[], bool],
+        parent: QWidget | None = None,
+        *,
+        deletion_behavior: str = SYSTEM_RECYCLE_BIN,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Deleting Images")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setMinimumWidth(440)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+
+        self.current_file_label = QLabel("Preparing deletion...")
+        self.current_file_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, len(entries) * 2)
+        self.progress_bar.setValue(0)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        layout.addWidget(self.current_file_label)
+        layout.addWidget(self.progress_bar)
+
+        self.commit_result: DeleteFilterCommitResult | None = None
+        self.error: str | None = None
+        self._running = False
+        thread = QThread(self)
+        worker = _DeleteFilterWorker(
+            entries,
+            file_deleter,
+            preview_waiter,
+            deletion_behavior,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._update_progress)
+        worker.completed.connect(self._worker_completed)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(self._worker_failed)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._thread_finished)
+        self._thread: QThread | None = thread
+        self._worker: _DeleteFilterWorker | None = worker
+
+    def start(self) -> None:
+        if self._running:
+            return
+        if self._thread is None:
+            return
+        self._running = True
+        self._thread.start()
+
+    def _update_progress(
+        self, completed: int, total: int, current_file: str
+    ) -> None:
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(completed)
+        self.current_file_label.setText(current_file)
+
+    def _worker_completed(self, result: DeleteFilterCommitResult) -> None:
+        self.commit_result = result
+
+    def _worker_failed(self, message: str) -> None:
+        self.error = message
+
+    def _thread_finished(self) -> None:
+        self._thread = None
+        self._worker = None
+        self._running = False
+        if self.commit_result is not None:
+            self.progress_bar.setValue(self.progress_bar.maximum())
+            self.accept()
+        else:
+            self.reject()
+
+    @override
+    def reject(self) -> None:
+        if self._running:
+            return
+        super().reject()
+
+    @override
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._running:
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 class DeleteFilterDialog(QDialog):
@@ -43,7 +237,8 @@ class DeleteFilterDialog(QDialog):
         entries: list[ImageEntry],
         parent=None,
         *,
-        trash_file: Callable[[Path], bool] | None = None,
+        file_deleter: Callable[[Path], bool] | None = None,
+        deletion_behavior: str = SYSTEM_RECYCLE_BIN,
     ) -> None:
         super().__init__(parent)
         self.entries = list(entries)
@@ -51,7 +246,10 @@ class DeleteFilterDialog(QDialog):
         self.marked_for_deletion: set[Path] = set()
         self.reviewed_indices: set[int] = set()
         self.commit_result: DeleteFilterCommitResult | None = None
-        self._trash_file = trash_file or move_to_trash
+        self.deletion_behavior = deletion_behavior
+        self._file_deleter = file_deleter or (
+            lambda path: delete_file(path, deletion_behavior)
+        )
         self._allow_close = False
 
         self.setWindowTitle("Delete Filter")
@@ -285,10 +483,21 @@ class DeleteFilterDialog(QDialog):
     def _finish(self) -> None:
         count = len(self.marked_for_deletion)
         if count:
+            deleting_permanently = self.deletion_behavior == UNLINK
             answer = QMessageBox.question(
                 self,
-                "Delete Marked Images?",
-                f"Move {count} marked image(s) and their tag files to the Trash?",
+                (
+                    "Permanently Delete Marked Images?"
+                    if deleting_permanently
+                    else "Delete Marked Images?"
+                ),
+                (
+                    f"Permanently delete {count} marked image(s) and their "
+                    "tag files?\n\nThis cannot be undone."
+                    if deleting_permanently
+                    else f"Move {count} marked image(s) and their tag files "
+                    "to the system Recycle Bin?"
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -296,48 +505,41 @@ class DeleteFilterDialog(QDialog):
                 return
 
         self.preview_loader.clear()
-        self.preview_loader.wait_for_done()
-        moved_files: list[Path] = []
-        deleted_images: list[Path] = []
-        failures: dict[Path, str] = {}
-        for entry in self.entries:
-            if entry.image_path not in self.marked_for_deletion:
-                continue
-            if self._move_file_to_trash(entry.image_path, failures):
-                moved_files.append(entry.image_path)
-                deleted_images.append(entry.image_path)
-                if entry.tag_path.exists():
-                    if self._move_file_to_trash(entry.tag_path, failures):
-                        moved_files.append(entry.tag_path)
-
-        self.commit_result = DeleteFilterCommitResult(
-            deleted_images=deleted_images,
-            moved_files=moved_files,
-            failures=failures,
+        selected_entries = [
+            entry
+            for entry in self.entries
+            if entry.image_path in self.marked_for_deletion
+        ]
+        progress_dialog = DeleteFilterProgressDialog(
+            selected_entries,
+            self._file_deleter,
+            self.preview_loader.wait_for_done,
+            self,
+            deletion_behavior=self.deletion_behavior,
         )
+        progress_dialog.start()
+        progress_dialog.exec()
+        if progress_dialog.commit_result is None:
+            if progress_dialog.error:
+                QMessageBox.critical(
+                    self,
+                    "Could Not Delete Files",
+                    progress_dialog.error,
+                )
+            return
+
+        self.commit_result = progress_dialog.commit_result
         self._allow_close = True
-        if failures:
+        if self.commit_result.failures:
             QMessageBox.warning(
                 self,
                 "Could Not Delete All Files",
                 "\n".join(
                     f"{path.name}: {message}"
-                    for path, message in failures.items()
+                    for path, message in self.commit_result.failures.items()
                 ),
             )
         self.accept()
-
-    def _move_file_to_trash(
-        self, path: Path, failures: dict[Path, str]
-    ) -> bool:
-        try:
-            moved = self._trash_file(path)
-        except OSError as exc:
-            failures[path] = str(exc)
-            return False
-        if not moved:
-            failures[path] = "Could not move file to Trash."
-        return moved
 
     def _confirm_discard(self) -> bool:
         if not self.has_changes:

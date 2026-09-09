@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import threading
 import zipfile
 from pathlib import Path
@@ -45,6 +46,7 @@ from PySide6.QtWidgets import (
 import tagger.main_window as main_window_module
 import tagger.archive as archive_module
 import tagger.ai_tagger as ai_tagger_module
+import tagger.trash as trash_module
 from tagger.ai_tagger import (
     AI_DEPENDENCIES,
     AITaggingDialog,
@@ -55,7 +57,7 @@ from tagger.storage import ArchiveResult
 from tagger.bulk_operation import BulkOperationDialog
 from tagger.domain import ImageEntry, TagOperation
 from tagger.complex_filter import ComplexFilterDialog
-from tagger.delete_filter import DeleteFilterDialog
+from tagger.delete_filter import DeleteFilterDialog, DeleteFilterProgressDialog
 from tagger.main_window import MAX_RECENT_FOLDERS, RECENT_FOLDERS_SETTING, MainWindow
 from tagger.global_search import GlobalTagSearchDialog
 from tagger.preview import (
@@ -68,7 +70,9 @@ from tagger.preview import (
 )
 from tagger.review import ReviewDialog
 from tagger.settings import (
+    DELETE_FILTER_DELETION_BEHAVIOR_SETTING,
     JsonSettings,
+    MANUAL_DELETION_BEHAVIOR_SETTING,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
     PROXY_MODE_SETTING,
@@ -76,6 +80,7 @@ from tagger.settings import (
     SCROLLING_BEHAVIOR_SETTING,
     SettingsDialog,
     UNDERSCORES_SETTING,
+    get_deletion_behavior,
     get_scrolling_behavior,
 )
 from tagger.tag_library import (
@@ -85,6 +90,7 @@ from tagger.tag_library import (
     write_tag_library,
 )
 from tagger.traversal import TraversalDialog
+from tagger.trash import SYSTEM_RECYCLE_BIN, UNLINK
 from tagger.widgets import _StableCheckedToolButtonStyle
 
 
@@ -413,6 +419,64 @@ def test_general_settings_stages_startup_folder_preference(
     ) is True
 
 
+def test_general_settings_stages_deletion_behaviors(
+    qtbot, tmp_path: Path
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = JsonSettings(settings_path)
+    settings.setValue(DELETE_FILTER_DELETION_BEHAVIOR_SETTING, UNLINK)
+    settings.sync()
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    assert dialog.deletion_behavior_group.title() == "Deletion behavior"
+    for input_widget in (
+        dialog.delete_filter_deletion_input,
+        dialog.manual_deletion_input,
+    ):
+        assert [
+            input_widget.itemText(index)
+            for index in range(input_widget.count())
+        ] == ["System recycle bin", "Unlink"]
+    assert dialog.delete_filter_deletion_input.currentData() == UNLINK
+    assert (
+        dialog.manual_deletion_input.currentData() == SYSTEM_RECYCLE_BIN
+    )
+
+    dialog.delete_filter_deletion_input.setCurrentIndex(
+        dialog.delete_filter_deletion_input.findData(SYSTEM_RECYCLE_BIN)
+    )
+    dialog.manual_deletion_input.setCurrentIndex(
+        dialog.manual_deletion_input.findData(UNLINK)
+    )
+
+    assert dialog.apply_button.isEnabled()
+    assert (
+        get_deletion_behavior(
+            settings, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+        )
+        == UNLINK
+    )
+    assert (
+        get_deletion_behavior(settings, MANUAL_DELETION_BEHAVIOR_SETTING)
+        == SYSTEM_RECYCLE_BIN
+    )
+    dialog.apply_button.click()
+
+    persisted = JsonSettings(settings_path)
+    assert (
+        get_deletion_behavior(
+            persisted, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+        )
+        == SYSTEM_RECYCLE_BIN
+    )
+    assert (
+        get_deletion_behavior(persisted, MANUAL_DELETION_BEHAVIOR_SETTING)
+        == UNLINK
+    )
+    assert not dialog.apply_button.isEnabled()
+
+
 def test_settings_select_controls_use_stable_geometry(
     qtbot, tmp_path: Path
 ) -> None:
@@ -425,6 +489,8 @@ def test_settings_select_controls_use_stable_geometry(
 
     for combo_box in (
         settings_dialog.scrolling_behavior_input,
+        settings_dialog.delete_filter_deletion_input,
+        settings_dialog.manual_deletion_input,
         model_dialog.download_location_input,
     ):
         assert_stable_widget_size(combo_box)
@@ -434,6 +500,23 @@ def test_scrolling_behavior_defaults_to_pan(tmp_path: Path) -> None:
     settings = JsonSettings(tmp_path / "settings.json")
 
     assert get_scrolling_behavior(settings) == SCROLL_PAN
+
+
+def test_deletion_behavior_defaults_to_system_recycle_bin(
+    tmp_path: Path
+) -> None:
+    settings = JsonSettings(tmp_path / "settings.json")
+
+    assert (
+        get_deletion_behavior(
+            settings, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+        )
+        == SYSTEM_RECYCLE_BIN
+    )
+    assert (
+        get_deletion_behavior(settings, MANUAL_DELETION_BEHAVIOR_SETTING)
+        == SYSTEM_RECYCLE_BIN
+    )
 
 
 def test_tag_autocomplete_double_click_inserts_tag(qtbot, tmp_path: Path) -> None:
@@ -1301,12 +1384,13 @@ def test_image_context_delete_moves_image_and_tag_to_trash(
     window._load_directory(tmp_path, show_issues=False)
     moved: list[Path] = []
 
-    def fake_move_to_trash(path: Path) -> bool:
+    def fake_delete_file(path: Path, behavior: str) -> bool:
+        assert behavior == SYSTEM_RECYCLE_BIN
         moved.append(path)
         path.unlink()
         return True
 
-    monkeypatch.setattr(main_window_module, "move_to_trash", fake_move_to_trash)
+    monkeypatch.setattr(main_window_module, "delete_file", fake_delete_file)
     monkeypatch.setattr(
         QMessageBox,
         "question",
@@ -1326,6 +1410,44 @@ def test_image_context_delete_moves_image_and_tag_to_trash(
     current = window._current_entry()
     assert current is not None
     assert current.image_path == tmp_path / "second.png"
+
+
+def test_manual_delete_uses_unlink_setting(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.settings.setValue(MANUAL_DELETION_BEHAVIOR_SETTING, UNLINK)
+    window._load_directory(tmp_path, show_issues=False)
+    behaviors: list[str] = []
+    prompts: list[tuple[str, str]] = []
+
+    def fake_delete_file(path: Path, behavior: str) -> bool:
+        behaviors.append(behavior)
+        path.unlink()
+        return True
+
+    monkeypatch.setattr(main_window_module, "delete_file", fake_delete_file)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, message, *_args: (
+            prompts.append((title, message))
+            or QMessageBox.StandardButton.Yes
+        ),
+    )
+
+    window._delete_current_image_and_tag()
+
+    assert behaviors == [UNLINK, UNLINK]
+    assert prompts[0][0] == "Permanently Delete Image and Tag?"
+    assert "This cannot be undone." in prompts[0][1]
+    assert not image_path.exists()
+    assert not tag_path.exists()
 
 
 def test_image_context_menu_renames_selected_image_and_tag(
@@ -1417,12 +1539,13 @@ def test_image_catalog_delete_confirms_and_deletes_selected_image(
         dialog_options.append((buttons, default_button))
         return QMessageBox.StandardButton.Yes
 
-    def fake_move_to_trash(path: Path) -> bool:
+    def fake_delete_file(path: Path, behavior: str) -> bool:
+        assert behavior == SYSTEM_RECYCLE_BIN
         path.unlink()
         return True
 
     monkeypatch.setattr(QMessageBox, "question", confirm_delete)
-    monkeypatch.setattr(main_window_module, "move_to_trash", fake_move_to_trash)
+    monkeypatch.setattr(main_window_module, "delete_file", fake_delete_file)
 
     window.image_list.setFocus()
     qtbot.keyClick(window.image_list, Qt.Key.Key_Delete)
@@ -1538,10 +1661,10 @@ def test_move_to_trash_uses_qfile_instance_api(monkeypatch, tmp_path: Path) -> N
         def moveToTrash(self) -> bool:
             return True
 
-    monkeypatch.setattr(main_window_module, "QFile", FakeQFile)
+    monkeypatch.setattr(trash_module, "QFile", FakeQFile)
     path = tmp_path / "sample.png"
 
-    assert main_window_module.move_to_trash(path)
+    assert trash_module.move_to_trash(path)
     assert opened == [str(path)]
 
 
@@ -1562,8 +1685,8 @@ def test_image_context_delete_can_be_cancelled(
     )
     monkeypatch.setattr(
         main_window_module,
-        "move_to_trash",
-        lambda _path: (_ for _ in ()).throw(
+        "delete_file",
+        lambda _path, _behavior: (_ for _ in ()).throw(
             AssertionError("cancelled deletion must not move files")
         ),
     )
@@ -1593,6 +1716,51 @@ def test_image_menu_exposes_delete_filter_for_open_folder(
     window._load_directory(tmp_path, show_issues=False)
 
     assert window.delete_filter_action.isEnabled()
+
+
+def test_delete_filter_uses_configured_deletion_behavior(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    create_png(tmp_path / "sample.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.settings.setValue(
+        DELETE_FILTER_DELETION_BEHAVIOR_SETTING, UNLINK
+    )
+    window._load_directory(tmp_path, show_issues=False)
+    captured_deleters: list[Callable[[Path], bool]] = []
+    captured_behaviors: list[str] = []
+
+    class FakeDeleteFilterDialog:
+        class DialogCode:
+            Accepted = 1
+
+        commit_result = None
+
+        def __init__(
+            self,
+            _entries,
+            _parent,
+            *,
+            file_deleter,
+            deletion_behavior: str,
+        ) -> None:
+            captured_deleters.append(file_deleter)
+            captured_behaviors.append(deletion_behavior)
+
+        def exec(self) -> int:
+            return 0
+
+    monkeypatch.setattr(
+        main_window_module, "DeleteFilterDialog", FakeDeleteFilterDialog
+    )
+    window._open_delete_filter()
+
+    assert captured_behaviors == [UNLINK]
+    delete_candidate = tmp_path / "delete-me.txt"
+    delete_candidate.write_text("content", encoding="utf-8")
+    assert captured_deleters[0](delete_candidate)
+    assert not delete_candidate.exists()
 
 
 def test_delete_filter_shortcuts_toggle_and_navigate(
@@ -1722,7 +1890,7 @@ def test_delete_filter_finishes_early_and_keeps_unreviewed_images(
         path.unlink()
         return True
 
-    dialog = DeleteFilterDialog(entries, trash_file=fake_move_to_trash)
+    dialog = DeleteFilterDialog(entries, file_deleter=fake_move_to_trash)
     qtbot.addWidget(dialog)
     dialog._toggle_current()
     prompts: list[tuple[str, str]] = []
@@ -1750,11 +1918,13 @@ def test_delete_filter_finishes_early_and_keeps_unreviewed_images(
     assert prompts == [
         (
             "Delete Marked Images?",
-            "Move 1 marked image(s) and their tag files to the Trash?",
+            "Move 1 marked image(s) and their tag files "
+            "to the system Recycle Bin?",
         ),
         (
             "Delete Marked Images?",
-            "Move 1 marked image(s) and their tag files to the Trash?",
+            "Move 1 marked image(s) and their tag files "
+            "to the system Recycle Bin?",
         ),
     ]
     assert moved == [tmp_path / "first.png", tmp_path / "first.txt"]
@@ -1767,6 +1937,87 @@ def test_delete_filter_finishes_early_and_keeps_unreviewed_images(
         assert (tmp_path / f"{name}.txt").exists()
 
 
+def test_delete_filter_progress_dialog_updates_while_deleting(
+    qtbot, tmp_path: Path
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    entry = ImageEntry(image_path, tag_path, ["cat"], b"cat\n")
+    release_worker = threading.Event()
+
+    def fake_move_to_trash(path: Path) -> bool:
+        if path == image_path:
+            release_worker.wait(timeout=5)
+        path.unlink()
+        return True
+
+    dialog = DeleteFilterProgressDialog(
+        [entry], fake_move_to_trash, lambda: True
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.start()
+    try:
+        qtbot.waitUntil(
+            lambda: dialog.current_file_label.text()
+            == "Moving to Recycle Bin: sample.png"
+        )
+        assert dialog.isVisible()
+        assert dialog.progress_bar.value() == 0
+        assert dialog.progress_bar.maximum() == 2
+        dialog.reject()
+        assert dialog.isVisible()
+    finally:
+        release_worker.set()
+
+    qtbot.waitUntil(lambda: not dialog._running)
+    assert dialog.commit_result is not None
+    assert dialog.commit_result.complete
+    assert dialog.commit_result.deleted_images == [image_path]
+    assert dialog.commit_result.deleted_files == [image_path, tag_path]
+    assert dialog.progress_bar.value() == 2
+
+
+def test_delete_filter_unlink_confirmation_warns_deletion_is_permanent(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_text("cat\n", encoding="utf-8")
+    dialog = DeleteFilterDialog(
+        [ImageEntry(image_path, tag_path, ["cat"], b"cat\n")],
+        file_deleter=lambda _path: True,
+        deletion_behavior=UNLINK,
+    )
+    qtbot.addWidget(dialog)
+    dialog._toggle_current()
+    prompts: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, message, *_args: (
+            prompts.append((title, message))
+            or QMessageBox.StandardButton.Cancel
+        ),
+    )
+
+    dialog._finish()
+
+    assert prompts == [
+        (
+            "Permanently Delete Marked Images?",
+            "Permanently delete 1 marked image(s) and their tag files?\n\n"
+            "This cannot be undone.",
+        )
+    ]
+    assert dialog.commit_result is None
+    assert image_path.exists()
+    assert tag_path.exists()
+
+
 def test_delete_filter_cancel_confirms_staged_changes(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
@@ -1776,7 +2027,7 @@ def test_delete_filter_cancel_confirms_staged_changes(
     tag_path.write_text("cat\n", encoding="utf-8")
     dialog = DeleteFilterDialog(
         [ImageEntry(image_path, tag_path, ["cat"], b"cat\n")],
-        trash_file=lambda _path: False,
+        file_deleter=lambda _path: False,
     )
     qtbot.addWidget(dialog)
     dialog.show()

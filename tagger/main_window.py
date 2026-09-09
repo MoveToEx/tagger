@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import cast, override
 
 from PySide6.QtCore import (
     QEvent,
-    QFile,
     QItemSelectionModel,
     QModelIndex,
     QObject,
@@ -72,11 +70,14 @@ from .paths import PROJECT_ROOT
 from .preview import ImageView, PreviewLoader
 from .review import ReviewDialog
 from .settings import (
+    DELETE_FILTER_DELETION_BEHAVIOR_SETTING,
+    MANUAL_DELETION_BEHAVIOR_SETTING,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
     UNDERSCORES_SETTING,
     SettingsDialog,
     create_app_settings,
+    get_deletion_behavior,
     get_download_proxy,
     get_scrolling_behavior,
 )
@@ -94,19 +95,13 @@ from .tag_library import (
     attach_tag_completer,
 )
 from .traversal import TraversalDialog
+from .trash import UNLINK, delete_file
 from .widgets import stabilize_checked_tool_button
 
 
 RECENT_FOLDERS_SETTING = "recent_folders"
 MAX_RECENT_FOLDERS = 10
 TOOLBAR_ICON_DIRECTORY = PROJECT_ROOT / "assets" / "icons"
-
-
-def move_to_trash(path: Path) -> bool:
-    trash_file = QFile(str(path))
-    move = cast(Callable[[], bool], trash_file.moveToTrash)
-    return move()
-
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -817,12 +812,25 @@ class MainWindow(QMainWindow):
         if row is None or entry is None or self.directory is None:
             return
 
+        deletion_behavior = get_deletion_behavior(
+            self.settings, MANUAL_DELETION_BEHAVIOR_SETTING
+        )
+        deleting_permanently = deletion_behavior == UNLINK
         answer = QMessageBox.question(
             self,
-            "Delete Image and Tag?",
-            "Move both files to the Trash?\n\n"
-            f"Image: {entry.image_path.name}\n"
-            f"Tag: {entry.tag_path.name}",
+            (
+                "Permanently Delete Image and Tag?"
+                if deleting_permanently
+                else "Delete Image and Tag?"
+            ),
+            (
+                "Permanently delete both files?\n\n"
+                if deleting_permanently
+                else "Move both files to the system Recycle Bin?\n\n"
+            )
+            + f"Image: {entry.image_path.name}\n"
+            + f"Tag: {entry.tag_path.name}"
+            + ("\n\nThis cannot be undone." if deleting_permanently else ""),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Yes,
         )
@@ -836,21 +844,30 @@ class MainWindow(QMainWindow):
 
         self.preview_loader.clear()
         self.preview_loader.wait_for_done()
-        moved: list[Path] = []
+        deleted: list[Path] = []
         failures: list[str] = []
-        image_moved = move_to_trash(entry.image_path)
-        if image_moved:
-            moved.append(entry.image_path)
-            if entry.tag_path.exists():
-                tag_moved = move_to_trash(entry.tag_path)
-                if tag_moved:
-                    moved.append(entry.tag_path)
-                else:
-                    failures.append(f"Could not move {entry.tag_path.name} to Trash.")
-        else:
-            failures.append(f"Could not move {entry.image_path.name} to Trash.")
 
-        if moved:
+        def delete_path(path: Path) -> bool:
+            try:
+                succeeded = delete_file(path, deletion_behavior)
+            except OSError as exc:
+                failures.append(f"Could not delete {path.name}: {exc}")
+                return False
+            if not succeeded:
+                destination = (
+                    "permanently" if deleting_permanently else "to Recycle Bin"
+                )
+                failures.append(f"Could not delete {path.name} {destination}.")
+            return succeeded
+
+        image_deleted = delete_path(entry.image_path)
+        if image_deleted:
+            deleted.append(entry.image_path)
+            if entry.tag_path.exists():
+                if delete_path(entry.tag_path):
+                    deleted.append(entry.tag_path)
+
+        if deleted:
             self._load_directory(
                 self.directory,
                 preferred_image=preferred_path,
@@ -862,9 +879,14 @@ class MainWindow(QMainWindow):
                 "Could Not Delete All Files",
                 "\n".join(failures),
             )
-        elif moved:
+        elif deleted:
+            action = (
+                "Permanently deleted"
+                if deleting_permanently
+                else "Moved to Recycle Bin"
+            )
             self.statusBar().showMessage(
-                f"Moved {entry.image_path.name} and {entry.tag_path.name} to Trash.",
+                f"{action}: {entry.image_path.name} and {entry.tag_path.name}.",
                 4000,
             )
 
@@ -902,10 +924,14 @@ class MainWindow(QMainWindow):
         if not self.catalog.entries or self.directory is None:
             return
         current = self._current_entry()
+        deletion_behavior = get_deletion_behavior(
+            self.settings, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+        )
         dialog = DeleteFilterDialog(
             self.catalog.entries,
             self,
-            trash_file=move_to_trash,
+            file_deleter=lambda path: delete_file(path, deletion_behavior),
+            deletion_behavior=deletion_behavior,
         )
         if (
             dialog.exec() == DeleteFilterDialog.DialogCode.Accepted
@@ -918,8 +944,13 @@ class MainWindow(QMainWindow):
             )
             deleted_count = len(dialog.commit_result.deleted_images)
             if deleted_count:
+                action = (
+                    "Permanently deleted"
+                    if deletion_behavior == UNLINK
+                    else "Moved to Recycle Bin"
+                )
                 self.statusBar().showMessage(
-                    f"Moved {deleted_count} marked image(s) to Trash.",
+                    f"{action} {deleted_count} marked image(s).",
                     4000,
                 )
 
