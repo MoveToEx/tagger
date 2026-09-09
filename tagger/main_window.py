@@ -70,12 +70,12 @@ from .paths import PROJECT_ROOT
 from .preview import ImageView, PreviewLoader
 from .review import ReviewDialog
 from .settings import (
-    DELETE_FILTER_DELETION_BEHAVIOR_SETTING,
-    MANUAL_DELETION_BEHAVIOR_SETTING,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
-    TIDY_DELETION_BEHAVIOR_SETTING,
     UNDERSCORES_SETTING,
+    USE_UNLINK_FOR_DELETE_FILTER_SETTING,
+    USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
+    USE_UNLINK_FOR_TIDY_SETTING,
     SettingsDialog,
     create_app_settings,
     get_deletion_behavior,
@@ -600,7 +600,7 @@ class MainWindow(QMainWindow):
             return
 
         deletion_behavior = get_deletion_behavior(
-            self.settings, TIDY_DELETION_BEHAVIOR_SETTING
+            self.settings, USE_UNLINK_FOR_TIDY_SETTING
         )
         deleting_permanently = deletion_behavior == UNLINK
         count = len(candidates)
@@ -906,7 +906,7 @@ class MainWindow(QMainWindow):
             return
 
         deletion_behavior = get_deletion_behavior(
-            self.settings, MANUAL_DELETION_BEHAVIOR_SETTING
+            self.settings, USE_UNLINK_FOR_MANUAL_DELETE_SETTING
         )
         deleting_permanently = deletion_behavior == UNLINK
         answer = QMessageBox.question(
@@ -1018,7 +1018,7 @@ class MainWindow(QMainWindow):
             return
         current = self._current_entry()
         deletion_behavior = get_deletion_behavior(
-            self.settings, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+            self.settings, USE_UNLINK_FOR_DELETE_FILTER_SETTING
         )
         dialog = DeleteFilterDialog(
             self.catalog.entries,

@@ -70,19 +70,20 @@ from tagger.preview import (
 )
 from tagger.review import ReviewDialog
 from tagger.settings import (
-    DELETE_FILTER_DELETION_BEHAVIOR_SETTING,
     JsonSettings,
-    MANUAL_DELETION_BEHAVIOR_SETTING,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
     PROXY_MODE_SETTING,
     PROXY_SETTING,
     SCROLLING_BEHAVIOR_SETTING,
     SettingsDialog,
-    TIDY_DELETION_BEHAVIOR_SETTING,
     UNDERSCORES_SETTING,
+    USE_UNLINK_FOR_DELETE_FILTER_SETTING,
+    USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
+    USE_UNLINK_FOR_TIDY_SETTING,
     get_deletion_behavior,
     get_scrolling_behavior,
+    get_use_unlink,
 )
 from tagger.tag_library import (
     DownloadTagsDialog,
@@ -420,90 +421,121 @@ def test_general_settings_stages_startup_folder_preference(
     ) is True
 
 
-def test_general_settings_stages_deletion_behaviors(
+def test_general_settings_stages_use_unlink_options(
     qtbot, tmp_path: Path
 ) -> None:
     settings_path = tmp_path / "settings.json"
     settings = JsonSettings(settings_path)
-    settings.setValue(DELETE_FILTER_DELETION_BEHAVIOR_SETTING, UNLINK)
+    settings.setValue(USE_UNLINK_FOR_DELETE_FILTER_SETTING, True)
     settings.sync()
     dialog = SettingsDialog(settings=settings)
     qtbot.addWidget(dialog)
 
     assert dialog.deletion_behavior_group.title() == "Deletion behavior"
-    for input_widget in (
-        dialog.delete_filter_deletion_input,
-        dialog.manual_deletion_input,
-    ):
-        assert [
-            input_widget.itemText(index)
-            for index in range(input_widget.count())
-        ] == ["System recycle bin", "Unlink"]
-    assert dialog.delete_filter_deletion_input.currentData() == UNLINK
+    assert dialog.use_unlink_label.text() == "Use unlink for..."
+    assert dialog.use_unlink_label.alignment() & Qt.AlignmentFlag.AlignLeft
+    checkboxes = [
+        dialog.delete_filter_use_unlink_checkbox,
+        dialog.manual_delete_use_unlink_checkbox,
+        dialog.tidy_use_unlink_checkbox,
+    ]
+    assert [checkbox.text() for checkbox in checkboxes] == [
+        "Delete filter",
+        "Manual delete",
+        "Tidy",
+    ]
+    deletion_layout = dialog.deletion_behavior_group.layout()
+    assert deletion_layout is not None
+    checkbox_layout_item = deletion_layout.itemAt(1)
+    assert checkbox_layout_item is not None
+    checkbox_layout = checkbox_layout_item.layout()
+    assert checkbox_layout is not None
+    arranged_checkboxes = []
+    for index in range(3):
+        checkbox_item = checkbox_layout.itemAt(index)
+        assert checkbox_item is not None
+        arranged_checkboxes.append(checkbox_item.widget())
+    assert arranged_checkboxes == checkboxes
+    assert dialog.recycle_bin_default_label.text() == (
+        "System recycle bin is used by default if available"
+    )
     assert (
-        dialog.manual_deletion_input.currentData() == SYSTEM_RECYCLE_BIN
+        dialog.recycle_bin_default_label.alignment()
+        & Qt.AlignmentFlag.AlignRight
     )
+    assert dialog.delete_filter_use_unlink_checkbox.isChecked()
+    assert not dialog.manual_delete_use_unlink_checkbox.isChecked()
 
-    dialog.delete_filter_deletion_input.setCurrentIndex(
-        dialog.delete_filter_deletion_input.findData(SYSTEM_RECYCLE_BIN)
-    )
-    dialog.manual_deletion_input.setCurrentIndex(
-        dialog.manual_deletion_input.findData(UNLINK)
-    )
+    dialog.delete_filter_use_unlink_checkbox.setChecked(False)
+    dialog.manual_delete_use_unlink_checkbox.setChecked(True)
 
     assert dialog.apply_button.isEnabled()
     assert (
         get_deletion_behavior(
-            settings, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+            settings, USE_UNLINK_FOR_DELETE_FILTER_SETTING
         )
         == UNLINK
     )
     assert (
-        get_deletion_behavior(settings, MANUAL_DELETION_BEHAVIOR_SETTING)
+        get_deletion_behavior(settings, USE_UNLINK_FOR_MANUAL_DELETE_SETTING)
         == SYSTEM_RECYCLE_BIN
     )
     dialog.apply_button.click()
 
     persisted = JsonSettings(settings_path)
-    assert (
-        get_deletion_behavior(
-            persisted, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
-        )
-        == SYSTEM_RECYCLE_BIN
-    )
-    assert (
-        get_deletion_behavior(persisted, MANUAL_DELETION_BEHAVIOR_SETTING)
-        == UNLINK
-    )
+    assert persisted.value(
+        USE_UNLINK_FOR_DELETE_FILTER_SETTING, type=bool
+    ) is False
+    assert persisted.value(
+        USE_UNLINK_FOR_MANUAL_DELETE_SETTING, type=bool
+    ) is True
+    assert get_deletion_behavior(
+        persisted, USE_UNLINK_FOR_DELETE_FILTER_SETTING
+    ) == SYSTEM_RECYCLE_BIN
+    assert get_deletion_behavior(
+        persisted, USE_UNLINK_FOR_MANUAL_DELETE_SETTING
+    ) == UNLINK
     assert not dialog.apply_button.isEnabled()
 
 
-def test_general_settings_stages_tidy_deletion_behavior(
+def test_general_settings_ignores_legacy_deletion_behavior(
+    qtbot, tmp_path: Path
+) -> None:
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue("general/delete_filter_deletion_behavior", UNLINK)
+
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    assert not dialog.delete_filter_use_unlink_checkbox.isChecked()
+    assert (
+        get_deletion_behavior(
+            settings, USE_UNLINK_FOR_DELETE_FILTER_SETTING
+        )
+        == SYSTEM_RECYCLE_BIN
+    )
+
+
+def test_general_settings_stages_tidy_use_unlink(
     qtbot, tmp_path: Path
 ) -> None:
     settings_path = tmp_path / "settings.json"
     settings = JsonSettings(settings_path)
-    settings.setValue(TIDY_DELETION_BEHAVIOR_SETTING, UNLINK)
+    settings.setValue(USE_UNLINK_FOR_TIDY_SETTING, True)
     settings.sync()
     dialog = SettingsDialog(settings=settings)
     qtbot.addWidget(dialog)
 
-    assert dialog.tidy_deletion_input.currentData() == UNLINK
-    assert [
-        dialog.tidy_deletion_input.itemText(index)
-        for index in range(dialog.tidy_deletion_input.count())
-    ] == ["System recycle bin", "Unlink"]
+    assert dialog.tidy_use_unlink_checkbox.isChecked()
 
-    dialog.tidy_deletion_input.setCurrentIndex(
-        dialog.tidy_deletion_input.findData(SYSTEM_RECYCLE_BIN)
-    )
+    dialog.tidy_use_unlink_checkbox.setChecked(False)
     assert dialog.apply_button.isEnabled()
     dialog.apply_button.click()
 
+    persisted = JsonSettings(settings_path)
+    assert persisted.value(USE_UNLINK_FOR_TIDY_SETTING, type=bool) is False
     assert (
-        get_deletion_behavior(
-            JsonSettings(settings_path), TIDY_DELETION_BEHAVIOR_SETTING
-        )
+        get_deletion_behavior(persisted, USE_UNLINK_FOR_TIDY_SETTING)
         == SYSTEM_RECYCLE_BIN
     )
 
@@ -520,9 +552,6 @@ def test_settings_select_controls_use_stable_geometry(
 
     for combo_box in (
         settings_dialog.scrolling_behavior_input,
-        settings_dialog.delete_filter_deletion_input,
-        settings_dialog.manual_deletion_input,
-        settings_dialog.tidy_deletion_input,
         model_dialog.download_location_input,
     ):
         assert_stable_widget_size(combo_box)
@@ -541,14 +570,15 @@ def test_deletion_behavior_defaults_to_system_recycle_bin(
 
     assert (
         get_deletion_behavior(
-            settings, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+            settings, USE_UNLINK_FOR_DELETE_FILTER_SETTING
         )
         == SYSTEM_RECYCLE_BIN
     )
     assert (
-        get_deletion_behavior(settings, MANUAL_DELETION_BEHAVIOR_SETTING)
+        get_deletion_behavior(settings, USE_UNLINK_FOR_MANUAL_DELETE_SETTING)
         == SYSTEM_RECYCLE_BIN
     )
+    assert not get_use_unlink(settings, USE_UNLINK_FOR_TIDY_SETTING)
 
 
 def test_tag_autocomplete_double_click_inserts_tag(qtbot, tmp_path: Path) -> None:
@@ -969,7 +999,7 @@ def test_tidy_uses_unlink_setting(
     unknown.write_text("{}", encoding="utf-8")
     window = MainWindow()
     qtbot.addWidget(window)
-    window.settings.setValue(TIDY_DELETION_BEHAVIOR_SETTING, UNLINK)
+    window.settings.setValue(USE_UNLINK_FOR_TIDY_SETTING, True)
     window._load_directory(tmp_path, show_issues=False)
     behaviors: list[str] = []
 
@@ -1531,7 +1561,7 @@ def test_manual_delete_uses_unlink_setting(
     tag_path.write_text("cat\n", encoding="utf-8")
     window = MainWindow()
     qtbot.addWidget(window)
-    window.settings.setValue(MANUAL_DELETION_BEHAVIOR_SETTING, UNLINK)
+    window.settings.setValue(USE_UNLINK_FOR_MANUAL_DELETE_SETTING, True)
     window._load_directory(tmp_path, show_issues=False)
     behaviors: list[str] = []
     prompts: list[tuple[str, str]] = []
@@ -1835,7 +1865,7 @@ def test_delete_filter_uses_configured_deletion_behavior(
     window = MainWindow()
     qtbot.addWidget(window)
     window.settings.setValue(
-        DELETE_FILTER_DELETION_BEHAVIOR_SETTING, UNLINK
+        USE_UNLINK_FOR_DELETE_FILTER_SETTING, True
     )
     window._load_directory(tmp_path, show_issues=False)
     captured_deleters: list[Callable[[Path], bool]] = []

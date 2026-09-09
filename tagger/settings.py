@@ -52,7 +52,7 @@ from .tag_library import (
     TagLibrary,
     get_tag_library_file_info,
 )
-from .trash import DELETION_BEHAVIORS, SYSTEM_RECYCLE_BIN, UNLINK
+from .trash import SYSTEM_RECYCLE_BIN, UNLINK
 from .widgets import stabilize_widget_size
 
 
@@ -62,11 +62,9 @@ SCROLLING_BEHAVIOR_SETTING = "general/scrolling_behavior"
 OPEN_RECENT_FOLDER_ON_STARTUP_SETTING = (
     "general/open_recent_folder_on_startup"
 )
-DELETE_FILTER_DELETION_BEHAVIOR_SETTING = (
-    "general/delete_filter_deletion_behavior"
-)
-MANUAL_DELETION_BEHAVIOR_SETTING = "general/manual_deletion_behavior"
-TIDY_DELETION_BEHAVIOR_SETTING = "general/tidy_deletion_behavior"
+USE_UNLINK_FOR_DELETE_FILTER_SETTING = "general/use_unlink_for_delete_filter"
+USE_UNLINK_FOR_MANUAL_DELETE_SETTING = "general/use_unlink_for_manual_delete"
+USE_UNLINK_FOR_TIDY_SETTING = "general/use_unlink_for_tidy"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 NO_PROXY = "none"
@@ -82,11 +80,13 @@ def get_scrolling_behavior(settings: JsonSettings) -> str:
     return SCROLL_PAN
 
 
+def get_use_unlink(settings: JsonSettings, key: str) -> bool:
+    use_unlink = settings.value(key, False, type=bool)
+    return use_unlink if isinstance(use_unlink, bool) else False
+
+
 def get_deletion_behavior(settings: JsonSettings, key: str) -> str:
-    behavior = settings.value(key, None, type=str)
-    if isinstance(behavior, str) and behavior in DELETION_BEHAVIORS:
-        return behavior
-    return SYSTEM_RECYCLE_BIN
+    return UNLINK if get_use_unlink(settings, key) else SYSTEM_RECYCLE_BIN
 
 
 def _stabilize_checkbox(checkbox: QCheckBox) -> None:
@@ -271,16 +271,14 @@ class SettingsDialog(QDialog):
                 type=bool,
             ),
         )
-        self._applied_deletion_behaviors = (
-            get_deletion_behavior(
-                self.settings, DELETE_FILTER_DELETION_BEHAVIOR_SETTING
+        self._applied_use_unlink_options = (
+            get_use_unlink(
+                self.settings, USE_UNLINK_FOR_DELETE_FILTER_SETTING
             ),
-            get_deletion_behavior(
-                self.settings, MANUAL_DELETION_BEHAVIOR_SETTING
+            get_use_unlink(
+                self.settings, USE_UNLINK_FOR_MANUAL_DELETE_SETTING
             ),
-            get_deletion_behavior(
-                self.settings, TIDY_DELETION_BEHAVIOR_SETTING
-            ),
+            get_use_unlink(self.settings, USE_UNLINK_FOR_TIDY_SETTING),
         )
         self.setWindowTitle("Settings")
         self.resize(760, 520)
@@ -409,48 +407,49 @@ class SettingsDialog(QDialog):
         group_layout.addRow("Mouse wheel", self.scrolling_behavior_input)
 
         self.deletion_behavior_group = QGroupBox("Deletion behavior")
-        self.delete_filter_deletion_input = QComboBox()
-        self.delete_filter_deletion_input.addItem(
-            "System recycle bin", SYSTEM_RECYCLE_BIN
+        self.use_unlink_label = QLabel("Use unlink for...")
+        self.use_unlink_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        self.delete_filter_deletion_input.addItem("Unlink", UNLINK)
-        self.delete_filter_deletion_input.setCurrentIndex(
-            self.delete_filter_deletion_input.findData(
-                self._applied_deletion_behaviors[0]
-            )
+        self.delete_filter_use_unlink_checkbox = QCheckBox("Delete filter")
+        self.delete_filter_use_unlink_checkbox.setChecked(
+            self._applied_use_unlink_options[0]
         )
-        stabilize_widget_size(self.delete_filter_deletion_input)
+        self.manual_delete_use_unlink_checkbox = QCheckBox("Manual delete")
+        self.manual_delete_use_unlink_checkbox.setChecked(
+            self._applied_use_unlink_options[1]
+        )
+        self.tidy_use_unlink_checkbox = QCheckBox("Tidy")
+        self.tidy_use_unlink_checkbox.setChecked(
+            self._applied_use_unlink_options[2]
+        )
+        for checkbox in (
+            self.delete_filter_use_unlink_checkbox,
+            self.manual_delete_use_unlink_checkbox,
+            self.tidy_use_unlink_checkbox,
+        ):
+            _stabilize_checkbox(checkbox)
 
-        self.manual_deletion_input = QComboBox()
-        self.manual_deletion_input.addItem(
-            "System recycle bin", SYSTEM_RECYCLE_BIN
+        deletion_options_layout = QHBoxLayout()
+        deletion_options_layout.addWidget(
+            self.delete_filter_use_unlink_checkbox
         )
-        self.manual_deletion_input.addItem("Unlink", UNLINK)
-        self.manual_deletion_input.setCurrentIndex(
-            self.manual_deletion_input.findData(
-                self._applied_deletion_behaviors[1]
-            )
+        deletion_options_layout.addWidget(
+            self.manual_delete_use_unlink_checkbox
         )
-        stabilize_widget_size(self.manual_deletion_input)
+        deletion_options_layout.addWidget(self.tidy_use_unlink_checkbox)
+        deletion_options_layout.addStretch(1)
 
-        self.tidy_deletion_input = QComboBox()
-        self.tidy_deletion_input.addItem(
-            "System recycle bin", SYSTEM_RECYCLE_BIN
+        self.recycle_bin_default_label = QLabel(
+            "System recycle bin is used by default if available"
         )
-        self.tidy_deletion_input.addItem("Unlink", UNLINK)
-        self.tidy_deletion_input.setCurrentIndex(
-            self.tidy_deletion_input.findData(
-                self._applied_deletion_behaviors[2]
-            )
+        self.recycle_bin_default_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        stabilize_widget_size(self.tidy_deletion_input)
-
-        deletion_layout = QFormLayout(self.deletion_behavior_group)
-        deletion_layout.addRow(
-            "Delete filter", self.delete_filter_deletion_input
-        )
-        deletion_layout.addRow("Manual delete", self.manual_deletion_input)
-        deletion_layout.addRow("Tidy", self.tidy_deletion_input)
+        deletion_layout = QVBoxLayout(self.deletion_behavior_group)
+        deletion_layout.addWidget(self.use_unlink_label)
+        deletion_layout.addLayout(deletion_options_layout)
+        deletion_layout.addWidget(self.recycle_bin_default_label)
 
         page_layout = QVBoxLayout(page)
         page_layout.addWidget(self.startup_group)
@@ -463,13 +462,13 @@ class SettingsDialog(QDialog):
         self.scrolling_behavior_input.currentIndexChanged.connect(
             self._settings_changed
         )
-        self.delete_filter_deletion_input.currentIndexChanged.connect(
+        self.delete_filter_use_unlink_checkbox.toggled.connect(
             self._settings_changed
         )
-        self.manual_deletion_input.currentIndexChanged.connect(
+        self.manual_delete_use_unlink_checkbox.toggled.connect(
             self._settings_changed
         )
-        self.tidy_deletion_input.currentIndexChanged.connect(
+        self.tidy_use_unlink_checkbox.toggled.connect(
             self._settings_changed
         )
         return page
@@ -680,8 +679,8 @@ class SettingsDialog(QDialog):
             self._scrolling_behavior() != self._applied_scrolling_behavior
             or self.open_recent_folder_checkbox.isChecked()
             != self._applied_open_recent_folder_on_startup
-            or self._deletion_behaviors()
-            != self._applied_deletion_behaviors
+            or self._use_unlink_options()
+            != self._applied_use_unlink_options
             or self._transform_options() != self._applied_transform_options
             or self._proxy_preferences()
             != (self._applied_proxy_mode, self._applied_proxy_url)
@@ -697,16 +696,11 @@ class SettingsDialog(QDialog):
         behavior = self.scrolling_behavior_input.currentData()
         return behavior if isinstance(behavior, str) else SCROLL_PAN
 
-    def _deletion_behaviors(self) -> tuple[str, str, str]:
-        delete_filter = self.delete_filter_deletion_input.currentData()
-        manual = self.manual_deletion_input.currentData()
-        tidy = self.tidy_deletion_input.currentData()
+    def _use_unlink_options(self) -> tuple[bool, bool, bool]:
         return (
-            delete_filter
-            if isinstance(delete_filter, str)
-            else SYSTEM_RECYCLE_BIN,
-            manual if isinstance(manual, str) else SYSTEM_RECYCLE_BIN,
-            tidy if isinstance(tidy, str) else SYSTEM_RECYCLE_BIN,
+            self.delete_filter_use_unlink_checkbox.isChecked(),
+            self.manual_delete_use_unlink_checkbox.isChecked(),
+            self.tidy_use_unlink_checkbox.isChecked(),
         )
 
     def _proxy_preferences(self) -> tuple[str, str]:
@@ -725,7 +719,7 @@ class SettingsDialog(QDialog):
         )
         underscores = self.underscores_checkbox.isChecked()
         parentheses = self.parentheses_checkbox.isChecked()
-        deletion_behaviors = self._deletion_behaviors()
+        use_unlink_options = self._use_unlink_options()
         proxy_mode, proxy_url = self._proxy_preferences()
         proxy = _resolved_proxy(proxy_mode, proxy_url)
         self.settings.setValue(SCROLLING_BEHAVIOR_SETTING, scrolling_behavior)
@@ -736,16 +730,16 @@ class SettingsDialog(QDialog):
         self.settings.setValue(UNDERSCORES_SETTING, underscores)
         self.settings.setValue(PARENTHESES_SETTING, parentheses)
         self.settings.setValue(
-            DELETE_FILTER_DELETION_BEHAVIOR_SETTING,
-            deletion_behaviors[0],
+            USE_UNLINK_FOR_DELETE_FILTER_SETTING,
+            use_unlink_options[0],
         )
         self.settings.setValue(
-            MANUAL_DELETION_BEHAVIOR_SETTING,
-            deletion_behaviors[1],
+            USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
+            use_unlink_options[1],
         )
         self.settings.setValue(
-            TIDY_DELETION_BEHAVIOR_SETTING,
-            deletion_behaviors[2],
+            USE_UNLINK_FOR_TIDY_SETTING,
+            use_unlink_options[2],
         )
         self.settings.setValue(PROXY_MODE_SETTING, proxy_mode)
         self.settings.setValue(PROXY_SETTING, proxy_url)
@@ -765,7 +759,7 @@ class SettingsDialog(QDialog):
             open_recent_folder_on_startup
         )
         self._applied_transform_options = (underscores, parentheses)
-        self._applied_deletion_behaviors = deletion_behaviors
+        self._applied_use_unlink_options = use_unlink_options
         self._applied_proxy_mode = proxy_mode
         self._applied_proxy_url = proxy_url
         self.apply_button.setEnabled(False)
