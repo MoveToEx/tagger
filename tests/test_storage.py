@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+
 import zipfile
 from pathlib import Path
 
 import pytest
 
-from tagger.domain import ImageEntry
+from tagger.domain.models import ImageEntry
 from tagger.storage import (
     archive_entries,
     BatchPreflightError,

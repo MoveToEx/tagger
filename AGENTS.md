@@ -3,8 +3,10 @@
 ## Project Structure & Module Organization
 
 - `main.py` is the executable entry point; it starts the PySide6 application in `tagger/app.py`.
-- `tagger/` contains the application package. `main_window.py` and feature-dialog modules implement the UI; `domain.py`, `catalog.py`, `storage.py`, and `paths.py` hold core data and filesystem behavior; `settings.py`, `tag_library.py`, and `preview.py` provide supporting services.
-- `tests/` contains pytest tests. `test_domain.py`, `test_storage.py`, and `test_paths.py` cover non-UI behavior; `test_qt_ui.py` covers dialogs and main-window workflows.
+- `tagger/domain/` contains image/scan models, tag operations, and traversal/review sessions. `storage.py`, `paths.py`, `trash.py`, and `deduplication.py` hold filesystem behavior and duplicate detection.
+- `tagger/ui/main_window/` contains the main window and its action, folder, file-operation, tag-editing, and dialog controllers. `tagger/ui/dialogs/` contains feature dialogs; `tagger/ui/preview/` separates background loading from image display. Catalog and shared widgets also live under `tagger/ui/`.
+- `tagger/ai_tagging/`, `tagger/settings/`, and `tagger/tag_library/` group their services and dialogs by feature. Keep persistence, download, and inference code separate from widget code, and retain lazy imports for optional AI dependencies.
+- `tests/` contains domain, storage, path, duplicate-detection, and tag-library tests. `tests/ui/` groups Qt workflows by feature and provides shared helpers in `helpers.py`; `tests/conftest.py` provides isolation for both groups.
 - `data/` is the default runtime data directory for settings and the downloaded tag library; use `TAGGER_DATA_DIRECTORY` for isolated or temporary data.
 
 ## Build, Test, and Development Commands

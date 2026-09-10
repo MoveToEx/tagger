@@ -100,6 +100,44 @@ After selecting images and inference parameters the app will start inference. Th
 
 After inference completes, you are supposed to check tags one by one. You can use shortcuts from the traversal window here.
 
+## Code layout
+
+`main.py` starts the application through `tagger/app.py`.
+
+```text
+tagger/
+  domain/          Image models, tag operations, traversal and review sessions
+  ai_tagging/      Dependency checks, model caching/downloads, inference and dialogs
+  settings/        JSON storage, preferences, proxy configuration and settings UI
+  tag_library/     Binary storage, search index, downloads and completion widgets
+  ui/
+    main_window/  Window layout/selection and controllers for actions and workflows
+    dialogs/      Archive, filters, deduplication, search, review and traversal
+    preview/      Background image loading and image display
+    catalog.py    Qt image catalog model
+    widgets.py    Shared widget sizing and painting helpers
+  storage.py      Image/tag scanning and writes, renames and archives
+  paths.py        Application data locations
+  deduplication.py  Perceptual-hash matching
+  trash.py        File deletion
+tests/
+  test_*.py       Domain and service tests
+  ui/             Qt tests grouped by feature
+```
+
+The main window owns the widgets and current selection. Its controllers handle
+menus and action state (`actions.py`), folder loading and recent folders
+(`folders.py`), image file operations (`files.py`), tag editing (`tags.py`), and
+launching feature dialogs (`dialogs.py`). Controllers keep a typed reference to
+the window; imports used only for typing stay under `TYPE_CHECKING` to avoid
+runtime cycles.
+
+Import services from their implementation modules, such as
+`tagger.settings.store` or `tagger.ai_tagging.inference`. Package exports for
+domain models, settings and the tag library remain available without importing
+their dialogs. Optional model runtimes such as PyTorch and timm are imported
+only when model operations run.
+
 ## Tests
 
 ```powershell

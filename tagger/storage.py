@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .domain import ImageEntry, ScanIssue, ScanResult, parse_tags, serialize_tags
+from tagger.domain.models import ImageEntry, ScanIssue, ScanResult
+from tagger.domain.tags import parse_tags, serialize_tags
 
 
 class ExternalChangeError(OSError):

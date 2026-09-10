@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from pathlib import Path
 
 from tagger.paths import (
@@ -9,8 +10,8 @@ from tagger.paths import (
     get_settings_path,
     get_tag_library_path,
 )
-from tagger.settings import create_app_settings
-from tagger.tag_library import TagLibrary
+from tagger.settings.store import create_app_settings
+from tagger.tag_library.library import TagLibrary
 
 
 def test_environment_data_directory_is_used_by_app_defaults(

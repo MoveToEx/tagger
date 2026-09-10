@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+
 from pathlib import Path
 
 import pytest
 
-from tagger.domain import (
-    ImageEntry,
-    ReviewSession,
-    TagOperation,
-    TraversalSession,
+from tagger.domain.models import ImageEntry, TagOperation
+from tagger.domain.review import ReviewSession
+from tagger.domain.traversal import TraversalSession
+from tagger.domain.tags import (
     apply_tag_operation,
     filter_traversal_entries,
     normalize_tags,

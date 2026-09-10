@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
-from .main_window import MainWindow
+from tagger.ui.main_window.window import MainWindow
 
 
 def main(argv: Sequence[str] | None = None) -> int:

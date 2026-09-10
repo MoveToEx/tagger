@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-import tagger.tag_library as tag_library_module
+import tagger.tag_library.download as tag_library_module
+from tagger.tag_library.format import write_tag_library
 from tagger.domain import ImageEntry
 from tagger.tag_library import (
     TagLibrary,
@@ -77,7 +78,7 @@ def test_folder_tags_are_merged_without_rebuilding_global_index(
     tmp_path: Path, monkeypatch
 ) -> None:
     library_path = tmp_path / "tags.bin"
-    tag_library_module.write_tag_library(
+    write_tag_library(
         library_path,
         [("shared_tag", 100), ("global_tag", 50), ("local_tag", 1)],
     )

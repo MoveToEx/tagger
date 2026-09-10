@@ -1,0 +1,366 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import QMimeData, QModelIndex, QPoint, QPointF, QUrl, Qt
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtWidgets import QMenu
+
+from tagger.settings.preferences import OPEN_RECENT_FOLDER_ON_STARTUP_SETTING
+from tagger.settings.store import JsonSettings
+import tagger.ui.main_window.files as window_files
+from tagger.ui.main_window.folders import MAX_RECENT_FOLDERS, RECENT_FOLDERS_SETTING
+from tagger.ui.main_window.window import MainWindow
+import tagger.ui.main_window.window as main_window_module
+
+from .helpers import create_png
+
+
+def test_file_menu_opens_recent_folder(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    current = tmp_path / "current"
+    recent_a = tmp_path / "recent-a"
+    recent_b = tmp_path / "recent-b"
+    for folder in (current, recent_a, recent_b):
+        folder.mkdir()
+        create_png(folder / "sample.png")
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(
+        RECENT_FOLDERS_SETTING,
+        [str(recent_a), str(recent_b)],
+    )
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.directory is None
+    assert window.commands.open_recent_action.text() == "Open Recent"
+    assert window.commands.open_recent_action.isEnabled()
+    assert window.commands.open_recent_menu.title() == "Open Recent"
+    assert [action.text() for action in window.commands.open_recent_menu.actions()] == [
+        str(recent_a),
+        str(recent_b),
+    ]
+    file_menu = next(
+        menu
+        for menu in window.menuBar().findChildren(QMenu)
+        if menu.title() == "&File"
+    )
+    assert file_menu is not None
+    assert window.commands.open_recent_action in file_menu.actions()
+
+    window.folders._load_directory(current, show_issues=False)
+
+    assert window.directory == current
+    assert window.commands.open_recent_action.isEnabled()
+    window.folders._update_recent_folder_menu()
+    recent_action = next(
+        action
+        for action in window.commands.open_recent_menu.actions()
+        if action.text() == str(recent_b)
+    )
+    recent_action.trigger()
+
+    assert window.directory == recent_b
+    assert window.commands.open_recent_action.isEnabled()
+    assert window.catalog.image_count == 1
+    assert settings.value(RECENT_FOLDERS_SETTING) == [
+        str(recent_b),
+        str(current),
+        str(recent_a),
+    ]
+
+
+def test_open_folder_uses_most_recent_folder(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    recent = tmp_path / "recent"
+    recent.mkdir()
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(RECENT_FOLDERS_SETTING, [str(recent)])
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+    starts: list[str] = []
+
+    def get_existing_directory(_parent, _title: str, start: str) -> str:
+        starts.append(start)
+        return ""
+
+    monkeypatch.setattr(
+        window_files.QFileDialog,
+        "getExistingDirectory",
+        get_existing_directory,
+    )
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders.open_folder()
+
+    assert starts == [str(recent)]
+
+
+def test_main_window_opens_most_recent_folder_on_startup(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    recent_a = tmp_path / "recent-a"
+    recent_b = tmp_path / "recent-b"
+    for folder in (recent_a, recent_b):
+        folder.mkdir()
+        create_png(folder / "sample.png")
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(OPEN_RECENT_FOLDER_ON_STARTUP_SETTING, True)
+    settings.setValue(
+        RECENT_FOLDERS_SETTING,
+        [str(recent_a), str(recent_b)],
+    )
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.directory == recent_a
+    assert window.catalog.image_count == 1
+    assert window.windowTitle() == f"{recent_a.name} - Image Tagger"
+    qtbot.waitUntil(lambda: "32 × 24 px" in window.image_info_label.text())
+
+
+def test_folder_load_emits_one_current_image_change(
+    qtbot, tmp_path: Path
+) -> None:
+    for index in range(40):
+        create_png(tmp_path / f"image-{index:02d}.png")
+        (tmp_path / f"image-{index:02d}.txt").write_text(
+            "cat, dog\n", encoding="utf-8"
+        )
+    window = MainWindow()
+    qtbot.addWidget(window)
+    current_changes: list[QModelIndex] = []
+    window.image_list.selectionModel().currentChanged.connect(
+        lambda current, _previous: current_changes.append(current)
+    )
+
+    window.folders._load_directory(tmp_path, show_issues=False)
+
+    assert len(current_changes) == 1
+    assert window.catalog.entry_for_index(current_changes[0]) is not None
+    assert window.preview_loader.wait_for_done()
+
+
+def test_file_menu_disables_missing_recent_folder(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(
+        RECENT_FOLDERS_SETTING,
+        [str(tmp_path / "missing")],
+    )
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.directory is None
+    assert not window.commands.open_recent_action.isEnabled()
+    assert window.commands.open_recent_menu.actions() == []
+    assert window.commands.open_recent_action.toolTip() == (
+        "No recently opened folder is available."
+    )
+
+
+def test_recent_folders_are_deduplicated_and_capped(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    settings = JsonSettings(tmp_path / "settings.json")
+    monkeypatch.setattr(
+        main_window_module, "create_app_settings", lambda: settings
+    )
+    folders = [tmp_path / f"folder-{index}" for index in range(12)]
+    for folder in folders:
+        folder.mkdir()
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    for folder in folders:
+        window.folders._record_recent_folder(folder)
+    window.folders._record_recent_folder(folders[-3])
+
+    recent = settings.value(RECENT_FOLDERS_SETTING)
+    assert isinstance(recent, list)
+    assert recent == [
+        str(folders[-3]),
+        *[
+            str(folder)
+            for folder in reversed(folders)
+            if folder != folders[-3]
+        ][: MAX_RECENT_FOLDERS - 1],
+    ]
+
+
+def test_image_list_groups_images_by_subfolder(qtbot, tmp_path: Path) -> None:
+    nested = tmp_path / "nested"
+    deep = nested / "deep"
+    nested.mkdir()
+    deep.mkdir()
+    create_png(tmp_path / "root.png")
+    create_png(nested / "child.png")
+    create_png(deep / "grandchild.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.folders._load_directory(tmp_path, show_issues=False)
+
+    assert window.catalog.rowCount() == 2
+    nested_index = window.catalog.index(0, 0)
+    assert window.catalog.data(nested_index) == "nested"
+    assert window.catalog.entry_for_index(nested_index) is None
+    assert window.catalog.rowCount(nested_index) == 2
+    assert window.catalog.data(window.catalog.index(0, 0, nested_index)) == "deep"
+    assert window.catalog.data(
+        window.catalog.index(1, 0, nested_index)
+    ).startswith("child.png")
+    assert window.catalog.data(window.catalog.index(1, 0)).startswith("root.png")
+    assert window.catalog.group_for_row(0) == "Root folder"
+    assert window.catalog.group_for_row(1) == "nested"
+    assert window.catalog.group_for_row(2) == "nested/deep"
+
+    window.image_list.collapse(nested_index)
+    assert not window.image_list.isExpanded(nested_index)
+    window.image_list.expand(nested_index)
+    assert window.image_list.isExpanded(nested_index)
+    window.commands.next_action.trigger()
+    current = window._current_entry()
+    assert current is not None
+    assert current.image_path == nested / "child.png"
+    window.commands.next_action.trigger()
+    current = window._current_entry()
+    assert current is not None
+    assert current.image_path == deep / "grandchild.png"
+    assert not window.commands.next_action.isEnabled()
+
+
+def test_close_folder_empties_program_state(qtbot, tmp_path: Path) -> None:
+    create_png(tmp_path / "sample.png")
+    (tmp_path / "sample.txt").write_text("dog, cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    window.tag_input.setText("bird")
+    window.search_input.setText("cat")
+
+    assert window.commands.close_folder_action.isEnabled()
+    window.commands.close_folder_action.trigger()
+
+    assert window.directory is None
+    assert window.catalog.rowCount() == 0
+    assert not window.image_list.currentIndex().isValid()
+    assert window.tag_list.count() == 0
+    assert window.tag_input.text() == ""
+    assert window.search_input.text() == ""
+    assert window.image_view._pixmap is None
+    assert window.image_view._label.text() == "Open a folder to begin"
+    assert window.image_info_label.text() == "No image selected"
+    assert window.windowTitle() == "Image Tagger"
+    assert window.statusBar().currentMessage() == ""
+    assert not window.commands.close_folder_action.isEnabled()
+    assert not window.commands.rescan_action.isEnabled()
+    assert not window.commands.tidy_action.isEnabled()
+    assert not window.commands.archive_action.isEnabled()
+    assert not window.search_input.isEnabled()
+    assert not window.tag_input.isEnabled()
+    assert not window.commands.bulk_operation_action.isEnabled()
+
+
+def test_close_folder_allows_another_folder_drop(qtbot, tmp_path: Path) -> None:
+    create_png(tmp_path / "sample.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    window.folders.close_folder()
+
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(tmp_path))])
+    drag_event = QDragEnterEvent(
+        QPoint(20, 20),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    window.dragEnterEvent(drag_event)
+
+    assert drag_event.isAccepted()
+
+
+def test_dropped_folder_replaces_open_folder(qtbot, tmp_path: Path) -> None:
+    first_folder = tmp_path / "first"
+    second_folder = tmp_path / "second"
+    first_folder.mkdir()
+    second_folder.mkdir()
+    create_png(first_folder / "first.png")
+    create_png(second_folder / "second.png")
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(first_folder))])
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    drag_event = QDragEnterEvent(
+        QPoint(20, 20),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.dragEnterEvent(drag_event)
+    assert drag_event.isAccepted()
+
+    drop_event = QDropEvent(
+        QPointF(20, 20),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.dropEvent(drop_event)
+    assert drop_event.isAccepted()
+    assert window.directory == first_folder
+    assert window.catalog.rowCount() == 1
+
+    window.tag_input.setText("stale tag")
+    window.search_input.setText("stale search")
+    replacement_mime_data = QMimeData()
+    replacement_mime_data.setUrls([QUrl.fromLocalFile(str(second_folder))])
+    second_drag = QDragEnterEvent(
+        QPoint(20, 20),
+        Qt.DropAction.CopyAction,
+        replacement_mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.dragEnterEvent(second_drag)
+    assert second_drag.isAccepted()
+
+    second_drop = QDropEvent(
+        QPointF(20, 20),
+        Qt.DropAction.CopyAction,
+        replacement_mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.dropEvent(second_drop)
+
+    assert second_drop.isAccepted()
+    assert window.directory == second_folder
+    assert window.catalog.rowCount() == 1
+    assert window.catalog.entries[0].image_path == second_folder / "second.png"
+    assert window.tag_input.text() == ""
+    assert window.search_input.text() == ""
