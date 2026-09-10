@@ -32,7 +32,7 @@ from .domain import (
     parse_requested_tags,
     parse_tags,
 )
-from .preview import ImageView, PreviewLoader
+from .preview import DEFAULT_IMAGE_PREFETCH_COUNT, ImageView, PreviewLoader
 from .storage import (
     BatchCommitResult,
     BatchPreflightError,
@@ -58,6 +58,7 @@ class TraversalDialog(QDialog):
         *,
         root_directory: Path | None = None,
         tag_library: TagLibrary | None = None,
+        image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
     ) -> None:
         super().__init__(parent)
         self._entries = entries
@@ -75,6 +76,7 @@ class TraversalDialog(QDialog):
         self._updating_folder_checks = False
         self._shortcuts: list[QShortcut] = []
         self._started = root_directory is None
+        self._image_prefetch_count = max(0, image_prefetch_count)
 
         title = {
             TagOperation.ADD: "Add Tags Across Folder",
@@ -471,7 +473,14 @@ class TraversalDialog(QDialog):
         self.path_label.setText(item.image_path.name)
         self.current_tags.setPlainText(", ".join(item.original_tags) or "(none)")
         self.image_view.clear_image("Loading image...")
-        self.preview_loader.load(item.image_path)
+        next_index = self.session.current_index + 1
+        prefetch_paths = [
+            future_item.image_path
+            for future_item in self.session.items[
+                next_index : next_index + self._image_prefetch_count
+            ]
+        ]
+        self.preview_loader.load(item.image_path, prefetch_paths)
 
         self._populating_choices = True
         self.temporary_input.clear()

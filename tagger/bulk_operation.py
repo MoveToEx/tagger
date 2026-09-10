@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from .domain import ImageEntry, normalize_tags, parse_tags
-from .preview import ImageView, PreviewLoader
+from .preview import DEFAULT_IMAGE_PREFETCH_COUNT, ImageView, PreviewLoader
 from .python_syntax import PythonSyntaxHighlighter
 from .storage import (
     BatchCommitResult,
@@ -76,6 +76,7 @@ class BulkOperationDialog(QDialog):
         *,
         root_directory: Path,
         tag_library: TagLibrary | None = None,
+        image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
     ) -> None:
         super().__init__(parent)
         self._entries = [entry for entry in entries if entry.editable]
@@ -84,6 +85,7 @@ class BulkOperationDialog(QDialog):
         self._updating_checks = False
         self._changes: list[BulkChange] = []
         self._current_index = 0
+        self._image_prefetch_count = max(0, image_prefetch_count)
         self._decisions: dict[int, BulkDecision] = {}
         self._loading_decision = False
         self._allow_close = False
@@ -437,7 +439,14 @@ class BulkOperationDialog(QDialog):
         finally:
             self._loading_decision = False
         self.image_view.clear_image("Loading image...")
-        self.preview_loader.load(change.entry.image_path)
+        next_index = self._current_index + 1
+        prefetch_paths = [
+            future_change.entry.image_path
+            for future_change in self._changes[
+                next_index : next_index + self._image_prefetch_count
+            ]
+        ]
+        self.preview_loader.load(change.entry.image_path, prefetch_paths)
         self._update_changes_text()
         self._update_navigation_buttons()
         if self.next_button.isEnabled():

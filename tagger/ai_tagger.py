@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from .domain import ImageEntry, normalize_tags
 from .paths import get_model_directory
-from .preview import ImageView, PreviewLoader
+from .preview import DEFAULT_IMAGE_PREFETCH_COUNT, ImageView, PreviewLoader
 from .storage import BatchCommitResult, BatchPreflightError, WriteRequest, write_tags_batch
 from .widgets import stabilize_widget_size
 
@@ -395,6 +395,7 @@ class AITaggingDialog(QDialog):
         *,
         root_directory: Path | None = None,
         proxy: str | None = None,
+        image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
     ) -> None:
         super().__init__(parent)
         self._entries = [entry for entry in entries if entry.editable]
@@ -405,6 +406,7 @@ class AITaggingDialog(QDialog):
         self._results: dict[str, list[tuple[str, float]]] = {}
         self._selected_additions: dict[int, list[str]] = {}
         self._current_index = 0
+        self._image_prefetch_count = max(0, image_prefetch_count)
         self._thread: QThread | None = None
         self._worker: _InferenceWorker | None = None
         self.commit_result: BatchCommitResult | None = None
@@ -525,13 +527,16 @@ class AITaggingDialog(QDialog):
         splitter.setSizes([650, 350])
 
         self.back_button = QPushButton("Back")
+        self.apply_all_button = QPushButton("Apply All")
         self.next_button = QPushButton("Next")
         self.finish_button = QPushButton("Finish")
         self.back_button.clicked.connect(self._back)
+        self.apply_all_button.clicked.connect(self._apply_all)
         self.next_button.clicked.connect(self._next)
         self.finish_button.clicked.connect(self._finish)
         buttons = QHBoxLayout()
         buttons.addWidget(self.back_button)
+        buttons.addWidget(self.apply_all_button)
         buttons.addStretch(1)
         buttons.addWidget(self.next_button)
         buttons.addWidget(self.finish_button)
@@ -773,7 +778,14 @@ class AITaggingDialog(QDialog):
             self.ai_tags.setCurrentRow(0)
             self.ai_tags.setFocus()
         self.image_view.clear_image("Loading image...")
-        self.preview_loader.load(entry.image_path)
+        next_index = self._current_index + 1
+        prefetch_paths = [
+            future_entry.image_path
+            for future_entry in self._selected_entries[
+                next_index : next_index + self._image_prefetch_count
+            ]
+        ]
+        self.preview_loader.load(entry.image_path, prefetch_paths)
         self.back_button.setEnabled(self._current_index > 0)
         self.next_button.setEnabled(
             self._current_index + 1 < len(self._selected_entries)
@@ -829,10 +841,27 @@ class AITaggingDialog(QDialog):
             self._current_index -= 1
             self._load_current()
 
-    def _finish(self) -> None:
+    def _apply_all(self) -> None:
+        if self.pages.currentWidget() is not self.review_page:
+            return
+        self._finish(ignore_decisions=True)
+
+    def _finish(self, *, ignore_decisions: bool = False) -> None:
         self._stage_current()
+        additions_by_index = self._selected_additions
+        if ignore_decisions:
+            additions_by_index = {
+                index: [
+                    tag
+                    for tag, _probability in self._results.get(
+                        str(entry.image_path), ()
+                    )
+                    if tag not in entry.tags
+                ]
+                for index, entry in enumerate(self._selected_entries)
+            }
         requests: list[WriteRequest] = []
-        for index, additions in self._selected_additions.items():
+        for index, additions in additions_by_index.items():
             if not additions:
                 continue
             entry = self._selected_entries[index]

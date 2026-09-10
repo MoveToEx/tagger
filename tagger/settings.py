@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QSpinBox,
     QStackedWidget,
     QSizePolicy,
     QTreeWidget,
@@ -41,6 +42,8 @@ from .paths import (
     get_tag_library_path,
 )
 from .preview import (
+    DEFAULT_IMAGE_PREFETCH_COUNT,
+    MAX_IMAGE_PREFETCH_COUNT,
     SCROLL_NAVIGATE,
     SCROLL_NAVIGATE_AT_END,
     SCROLL_PAN,
@@ -59,6 +62,7 @@ from .widgets import stabilize_widget_size
 UNDERSCORES_SETTING = "autocomplete/transform_underscores_to_spaces"
 PARENTHESES_SETTING = "autocomplete/escape_parentheses"
 SCROLLING_BEHAVIOR_SETTING = "general/scrolling_behavior"
+IMAGE_PREFETCH_COUNT_SETTING = "general/traversal_image_prefetch_count"
 OPEN_RECENT_FOLDER_ON_STARTUP_SETTING = (
     "general/open_recent_folder_on_startup"
 )
@@ -78,6 +82,17 @@ def get_scrolling_behavior(settings: JsonSettings) -> str:
     if isinstance(behavior, str) and behavior in SCROLLING_BEHAVIORS:
         return behavior
     return SCROLL_PAN
+
+
+def get_image_prefetch_count(settings: JsonSettings) -> int:
+    count = settings.value(
+        IMAGE_PREFETCH_COUNT_SETTING,
+        DEFAULT_IMAGE_PREFETCH_COUNT,
+        type=int,
+    )
+    if not isinstance(count, int):
+        return DEFAULT_IMAGE_PREFETCH_COUNT
+    return max(0, min(MAX_IMAGE_PREFETCH_COUNT, count))
 
 
 def get_use_unlink(settings: JsonSettings, key: str) -> bool:
@@ -263,6 +278,9 @@ class SettingsDialog(QDialog):
             self._applied_proxy_url,
         ) = _proxy_preferences(self.settings)
         self._applied_scrolling_behavior = get_scrolling_behavior(self.settings)
+        self._applied_image_prefetch_count = get_image_prefetch_count(
+            self.settings
+        )
         self._applied_open_recent_folder_on_startup = cast(
             bool,
             self.settings.value(
@@ -406,6 +424,23 @@ class SettingsDialog(QDialog):
         group_layout = QFormLayout(self.scrolling_behavior_group)
         group_layout.addRow("Mouse wheel", self.scrolling_behavior_input)
 
+        self.traversal_group = QGroupBox("Traversal")
+        self.image_prefetch_count_input = QSpinBox()
+        self.image_prefetch_count_input.setRange(0, MAX_IMAGE_PREFETCH_COUNT)
+        self.image_prefetch_count_input.setValue(
+            self._applied_image_prefetch_count
+        )
+        self.image_prefetch_count_input.setSpecialValueText("Disabled")
+        stabilize_widget_size(
+            self.image_prefetch_count_input,
+            minimum_width=96,
+            vertical_padding=2,
+        )
+        traversal_layout = QFormLayout(self.traversal_group)
+        traversal_layout.addRow(
+            "Images to prefetch", self.image_prefetch_count_input
+        )
+
         self.deletion_behavior_group = QGroupBox("Deletion behavior")
         self.use_unlink_label = QLabel("Use unlink for...")
         self.use_unlink_label.setAlignment(
@@ -454,12 +489,16 @@ class SettingsDialog(QDialog):
         page_layout = QVBoxLayout(page)
         page_layout.addWidget(self.startup_group)
         page_layout.addWidget(self.scrolling_behavior_group)
+        page_layout.addWidget(self.traversal_group)
         page_layout.addWidget(self.deletion_behavior_group)
         page_layout.addStretch(1)
         self.open_recent_folder_checkbox.toggled.connect(
             self._settings_changed
         )
         self.scrolling_behavior_input.currentIndexChanged.connect(
+            self._settings_changed
+        )
+        self.image_prefetch_count_input.valueChanged.connect(
             self._settings_changed
         )
         self.delete_filter_use_unlink_checkbox.toggled.connect(
@@ -677,6 +716,8 @@ class SettingsDialog(QDialog):
     def _settings_changed(self, *_args: object) -> None:
         self.apply_button.setEnabled(
             self._scrolling_behavior() != self._applied_scrolling_behavior
+            or self.image_prefetch_count_input.value()
+            != self._applied_image_prefetch_count
             or self.open_recent_folder_checkbox.isChecked()
             != self._applied_open_recent_folder_on_startup
             or self._use_unlink_options()
@@ -714,6 +755,7 @@ class SettingsDialog(QDialog):
 
     def _apply(self) -> None:
         scrolling_behavior = self._scrolling_behavior()
+        image_prefetch_count = self.image_prefetch_count_input.value()
         open_recent_folder_on_startup = (
             self.open_recent_folder_checkbox.isChecked()
         )
@@ -723,6 +765,10 @@ class SettingsDialog(QDialog):
         proxy_mode, proxy_url = self._proxy_preferences()
         proxy = _resolved_proxy(proxy_mode, proxy_url)
         self.settings.setValue(SCROLLING_BEHAVIOR_SETTING, scrolling_behavior)
+        self.settings.setValue(
+            IMAGE_PREFETCH_COUNT_SETTING,
+            image_prefetch_count,
+        )
         self.settings.setValue(
             OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
             open_recent_folder_on_startup,
@@ -755,6 +801,7 @@ class SettingsDialog(QDialog):
             self.models_page.set_proxy(proxy)
         self.scrolling_behavior_changed.emit(scrolling_behavior)
         self._applied_scrolling_behavior = scrolling_behavior
+        self._applied_image_prefetch_count = image_prefetch_count
         self._applied_open_recent_folder_on_startup = (
             open_recent_folder_on_startup
         )

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from .domain import ImageEntry
-from .preview import PreviewLoader
+from .preview import DEFAULT_IMAGE_PREFETCH_COUNT, PreviewLoader
 from .trash import SYSTEM_RECYCLE_BIN, UNLINK, delete_file
 
 
@@ -239,6 +239,7 @@ class DeleteFilterDialog(QDialog):
         *,
         file_deleter: Callable[[Path], bool] | None = None,
         deletion_behavior: str = SYSTEM_RECYCLE_BIN,
+        image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
     ) -> None:
         super().__init__(parent)
         self.entries = list(entries)
@@ -251,6 +252,7 @@ class DeleteFilterDialog(QDialog):
             lambda path: delete_file(path, deletion_behavior)
         )
         self._allow_close = False
+        self._image_prefetch_count = max(0, image_prefetch_count)
 
         self.setWindowTitle("Delete Filter")
         self.resize(900, 680)
@@ -360,7 +362,14 @@ class DeleteFilterDialog(QDialog):
         )
         del blocker
         self._clear_image("Loading image...")
-        self.preview_loader.load(entry.image_path)
+        next_index = self.current_index + 1
+        prefetch_paths = [
+            future_entry.image_path
+            for future_entry in self.entries[
+                next_index : next_index + self._image_prefetch_count
+            ]
+        ]
+        self.preview_loader.load(entry.image_path, prefetch_paths)
         self.back_button.setEnabled(self.current_index > 0)
         self.next_button.setEnabled(self.current_index + 1 < len(self.entries))
         self.delete_checkbox.setEnabled(True)

@@ -70,6 +70,7 @@ from tagger.preview import (
 )
 from tagger.review import ReviewDialog
 from tagger.settings import (
+    IMAGE_PREFETCH_COUNT_SETTING,
     JsonSettings,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
@@ -82,6 +83,7 @@ from tagger.settings import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
     get_deletion_behavior,
+    get_image_prefetch_count,
     get_scrolling_behavior,
     get_use_unlink,
 )
@@ -315,6 +317,48 @@ def test_ai_tagger_disables_absent_models_in_selector(
     assert not empty_dialog.start_button.isEnabled()
 
 
+def test_ai_tagger_apply_all_ignores_tag_decisions(
+    qtbot, tmp_path: Path
+) -> None:
+    entries: list[ImageEntry] = []
+    for name, tags in {"first.png": ["cat"], "second.png": ["dog"]}.items():
+        image_path = tmp_path / name
+        tag_path = tmp_path / f"{Path(name).stem}.txt"
+        create_png(image_path)
+        source_bytes = (", ".join(tags) + "\n").encode()
+        tag_path.write_bytes(source_bytes)
+        entries.append(
+            ImageEntry(
+                image_path,
+                tag_path,
+                tags=tags,
+                source_bytes=source_bytes,
+            )
+        )
+
+    dialog = AITaggingDialog(entries, root_directory=tmp_path)
+    qtbot.addWidget(dialog)
+    dialog._selected_entries = entries
+    results = {
+        str(entries[0].image_path): [("first", 0.9), ("second", 0.8)],
+        str(entries[1].image_path): [("third", 0.95)],
+    }
+    dialog._inference_completed(results)
+
+    assert dialog.apply_all_button.text() == "Apply All"
+    dialog.ai_tags.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.next_button.click()
+    dialog.apply_all_button.click()
+
+    assert dialog.result() == AITaggingDialog.DialogCode.Accepted
+    assert (tmp_path / "first.txt").read_text(encoding="utf-8") == (
+        "cat, first, second\n"
+    )
+    assert (tmp_path / "second.txt").read_text(encoding="utf-8") == (
+        "dog, third\n"
+    )
+
+
 def test_settings_changes_only_take_effect_when_applied(
     qtbot, tmp_path: Path
 ) -> None:
@@ -388,6 +432,36 @@ def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> No
     assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE
     assert get_scrolling_behavior(JsonSettings(settings_path)) == SCROLL_NAVIGATE
     assert applied == [SCROLL_NAVIGATE]
+
+
+def test_general_settings_stages_traversal_image_prefetch_count(
+    qtbot, tmp_path: Path
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = JsonSettings(settings_path)
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    assert dialog.traversal_group.title() == "Traversal"
+    assert dialog.image_prefetch_count_input.value() == 2
+    assert get_image_prefetch_count(settings) == 2
+    assert_stable_widget_size(
+        dialog.image_prefetch_count_input,
+        minimum_width=96,
+        vertical_padding=2,
+    )
+
+    dialog.image_prefetch_count_input.setValue(5)
+
+    assert dialog.apply_button.isEnabled()
+    assert get_image_prefetch_count(settings) == 2
+    dialog.apply_button.click()
+
+    assert not dialog.apply_button.isEnabled()
+    assert get_image_prefetch_count(settings) == 5
+    persisted = JsonSettings(settings_path)
+    assert persisted.value(IMAGE_PREFETCH_COUNT_SETTING, type=int) == 5
+    assert get_image_prefetch_count(persisted) == 5
 
 
 def test_general_settings_stages_startup_folder_preference(
@@ -1867,9 +1941,11 @@ def test_delete_filter_uses_configured_deletion_behavior(
     window.settings.setValue(
         USE_UNLINK_FOR_DELETE_FILTER_SETTING, True
     )
+    window.settings.setValue(IMAGE_PREFETCH_COUNT_SETTING, 4)
     window._load_directory(tmp_path, show_issues=False)
     captured_deleters: list[Callable[[Path], bool]] = []
     captured_behaviors: list[str] = []
+    captured_prefetch_counts: list[int] = []
 
     class FakeDeleteFilterDialog:
         class DialogCode:
@@ -1884,9 +1960,11 @@ def test_delete_filter_uses_configured_deletion_behavior(
             *,
             file_deleter,
             deletion_behavior: str,
+            image_prefetch_count: int,
         ) -> None:
             captured_deleters.append(file_deleter)
             captured_behaviors.append(deletion_behavior)
+            captured_prefetch_counts.append(image_prefetch_count)
 
         def exec(self) -> int:
             return 0
@@ -1897,6 +1975,7 @@ def test_delete_filter_uses_configured_deletion_behavior(
     window._open_delete_filter()
 
     assert captured_behaviors == [UNLINK]
+    assert captured_prefetch_counts == [4]
     delete_candidate = tmp_path / "delete-me.txt"
     delete_candidate.write_text("content", encoding="utf-8")
     assert captured_deleters[0](delete_candidate)
@@ -2788,16 +2867,46 @@ def test_main_tag_deletion_requires_confirmation_from_button_and_context_menu(
     assert [item.text() for item in window.tag_list.selectedItems()] == []
 
 
-def test_preview_loader_ignores_stale_generation(qtbot) -> None:
+def test_preview_loader_ignores_stale_generation(qtbot, tmp_path: Path) -> None:
     loader = PreviewLoader()
     received: list[str] = []
     loader.loaded.connect(lambda _image, error: received.append(error))
-    loader._generation = 2
+    path = tmp_path / "sample.png"
+    loader._current_path = path
+    loader._desired_paths = {path}
+    loader._inflight[path] = 2
 
-    loader._on_finished(1, QImage(), "stale")
-    loader._on_finished(2, QImage(), "current")
+    loader._worker_finished(path, 1, QImage(), "stale")
+    loader._worker_finished(path, 2, QImage(), "current")
 
     assert received == ["current"]
+
+
+def test_preview_loader_caches_prefetched_images_without_emitting_them(
+    qtbot, tmp_path: Path
+) -> None:
+    paths = [tmp_path / f"image-{index}.png" for index in range(3)]
+    for path in paths:
+        create_png(path)
+    loader = PreviewLoader()
+    received: list[tuple[QImage, str]] = []
+    loader.loaded.connect(
+        lambda image, error: received.append((image, error))
+    )
+
+    loader.load(paths[0], paths[1:])
+
+    qtbot.waitUntil(lambda: set(loader._cache) == set(paths))
+    assert len(received) == 1
+    assert not received[0][0].isNull()
+    assert received[0][1] == ""
+
+    loader.load(paths[1], paths[2:])
+
+    assert len(received) == 2
+    assert not received[1][0].isNull()
+    assert received[1][1] == ""
+    assert set(loader._cache) == set(paths[1:])
 
 
 def test_traversal_does_not_write_until_finish(qtbot, tmp_path: Path) -> None:

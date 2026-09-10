@@ -80,6 +80,7 @@ from .settings import (
     create_app_settings,
     get_deletion_behavior,
     get_download_proxy,
+    get_image_prefetch_count,
     get_scrolling_behavior,
 )
 from .storage import (
@@ -1004,6 +1005,7 @@ class MainWindow(QMainWindow):
             self,
             root_directory=self.directory,
             tag_library=self.tag_library,
+            image_prefetch_count=get_image_prefetch_count(self.settings),
         )
         if dialog.exec() == ReviewDialog.DialogCode.Accepted and dialog.commit_result:
             current = self._current_entry()
@@ -1025,6 +1027,7 @@ class MainWindow(QMainWindow):
             self,
             file_deleter=lambda path: delete_file(path, deletion_behavior),
             deletion_behavior=deletion_behavior,
+            image_prefetch_count=get_image_prefetch_count(self.settings),
         )
         if (
             dialog.exec() == DeleteFilterDialog.DialogCode.Accepted
@@ -1084,6 +1087,7 @@ class MainWindow(QMainWindow):
             self,
             root_directory=self.directory,
             tag_library=self.tag_library,
+            image_prefetch_count=get_image_prefetch_count(self.settings),
         )
         if (
             dialog.exec() == BulkOperationDialog.DialogCode.Accepted
@@ -1120,6 +1124,7 @@ class MainWindow(QMainWindow):
             self,
             root_directory=self.directory,
             proxy=get_download_proxy(self.settings),
+            image_prefetch_count=get_image_prefetch_count(self.settings),
         )
         if dialog.exec() == AITaggingDialog.DialogCode.Accepted:
             self._load_directory(
@@ -1471,6 +1476,7 @@ class MainWindow(QMainWindow):
             parent=self,
             root_directory=self.directory,
             tag_library=self.tag_library,
+            image_prefetch_count=get_image_prefetch_count(self.settings),
         )
         if dialog.exec() == TraversalDialog.DialogCode.Accepted and self.directory:
             self._load_directory(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import override
 
@@ -37,10 +38,12 @@ SCROLLING_BEHAVIORS = {
     SCROLL_NAVIGATE_AT_END,
     SCROLL_ZOOM,
 }
+DEFAULT_IMAGE_PREFETCH_COUNT = 2
+MAX_IMAGE_PREFETCH_COUNT = 20
 
 
 class _PreviewSignals(QObject):
-    finished = Signal(int, QImage, str)
+    finished = Signal(object, int, QImage, str)
 
 
 class _PreviewWorker(QRunnable):
@@ -56,7 +59,7 @@ class _PreviewWorker(QRunnable):
         reader.setAutoTransform(True)
         image = reader.read()
         error = "" if not image.isNull() else reader.errorString()
-        self.signals.finished.emit(self.generation, image, error)
+        self.signals.finished.emit(self.path, self.generation, image, error)
 
 
 class PreviewLoader(QObject):
@@ -66,23 +69,66 @@ class PreviewLoader(QObject):
         super().__init__(parent)
         self._generation = 0
         self._pool = QThreadPool.globalInstance()
+        self._current_path: Path | None = None
+        self._desired_paths: set[Path] = set()
+        self._cache: dict[Path, tuple[QImage, str]] = {}
+        self._inflight: dict[Path, int] = {}
 
     def clear(self) -> None:
         self._generation += 1
+        self._current_path = None
+        self._desired_paths.clear()
+        self._cache.clear()
+        self._inflight.clear()
 
     def wait_for_done(self) -> bool:
         return self._pool.waitForDone()
 
-    def load(self, path: Path) -> None:
+    def load(
+        self,
+        path: Path,
+        prefetch_paths: Sequence[Path] = (),
+    ) -> None:
         self._generation += 1
-        worker = _PreviewWorker(self._generation, path)
-        worker.signals.finished.connect(self._on_finished)
-        self._pool.start(worker)
+        self._current_path = path
+        ordered_paths = dict.fromkeys((path, *prefetch_paths))
+        self._desired_paths = set(ordered_paths)
+        self._cache = {
+            cached_path: result
+            for cached_path, result in self._cache.items()
+            if cached_path in self._desired_paths
+        }
 
-    def _on_finished(self, generation: int, image: QImage, error: str) -> None:
-        if generation == self._generation:
+        cached = self._cache.get(path)
+        if cached is not None:
+            self.loaded.emit(*cached)
+
+        for requested_path in ordered_paths:
+            if (
+                requested_path in self._cache
+                or requested_path in self._inflight
+            ):
+                continue
+            worker = _PreviewWorker(self._generation, requested_path)
+            self._inflight[requested_path] = self._generation
+            worker.signals.finished.connect(self._worker_finished)
+            self._pool.start(worker)
+
+    def _worker_finished(
+        self,
+        path: Path,
+        generation: int,
+        image: QImage,
+        error: str,
+    ) -> None:
+        if self._inflight.get(path) != generation:
+            return
+        del self._inflight[path]
+        if path not in self._desired_paths:
+            return
+        self._cache[path] = (image, error)
+        if path == self._current_path:
             self.loaded.emit(image, error)
-
 
 class _ImageCanvas(QLabel):
     """Paint only the exposed portion instead of storing a scaled pixmap."""

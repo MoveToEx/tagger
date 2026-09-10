@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from .domain import ImageEntry, ReviewSession, parse_tags
-from .preview import ImageView, PreviewLoader
+from .preview import DEFAULT_IMAGE_PREFETCH_COUNT, ImageView, PreviewLoader
 from .storage import BatchCommitResult, BatchPreflightError, WriteRequest, write_tags_batch
 from .tag_library import TagLibrary, attach_tag_completer
 from .widgets import stabilize_widget_size
@@ -46,6 +46,7 @@ class ReviewDialog(QDialog):
         *,
         root_directory: Path | None = None,
         tag_library: TagLibrary | None = None,
+        image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
     ) -> None:
         super().__init__(parent)
         self._entries = entries
@@ -57,6 +58,7 @@ class ReviewDialog(QDialog):
         self._allow_close = False
         self._updating_checks = False
         self._started = root_directory is None
+        self._image_prefetch_count = max(0, image_prefetch_count)
 
         self.setWindowTitle("Review Tags")
         self.resize(980, 680)
@@ -380,7 +382,14 @@ class ReviewDialog(QDialog):
         self.path_label.setText(str(session.current_item.image_path))
         self.tag_label.setText(session.current_tag)
         self.image_view.clear_image("Loading image...")
-        self.preview_loader.load(session.current_item.image_path)
+        next_index = session.current_index + 1
+        prefetch_paths = [
+            item.image_path
+            for item in session.items[
+                next_index : next_index + self._image_prefetch_count
+            ]
+        ]
+        self.preview_loader.load(session.current_item.image_path, prefetch_paths)
         self._update_buttons()
 
     def _update_tag_status(self) -> None:
