@@ -34,6 +34,7 @@ from tagger.storage import (
 )
 from tagger.tag_library.completion import attach_tag_completer
 from tagger.tag_library.library import TagLibrary
+from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.config import DEFAULT_IMAGE_PREFETCH_COUNT
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
@@ -172,6 +173,9 @@ class ReviewDialog(QDialog):
         self.keep_button.clicked.connect(self._keep)
         self.delete_button.clicked.connect(self._delete)
         self.next_button.clicked.connect(self._next)
+        self._mouse_navigation = MouseNavigation(
+            self, back=[self.back_button], forward=[self.next_button]
+        )
         self.discard_button.clicked.connect(self._discard_and_close)
         self.finish_button.clicked.connect(self._finish)
 

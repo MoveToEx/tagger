@@ -38,6 +38,7 @@ from tagger.ui.dialogs.delete_filter import (
     DeleteFilterCommitResult,
     DeleteFilterProgressDialog,
 )
+from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
 from tagger.ui.widgets import stabilize_widget_size
@@ -115,6 +116,9 @@ class DeduplicateDialog(QDialog):
         self.back_button.clicked.connect(lambda: self._navigate(-1))
         self.next_button = QPushButton("Next")
         self.next_button.clicked.connect(lambda: self._navigate(1))
+        self._mouse_navigation = MouseNavigation(
+            self, back=[self.back_button], forward=[self.next_button]
+        )
         self.finish_button = QPushButton("Finish")
         self.finish_button.clicked.connect(self._finish)
         self.review_controls = QWidget()

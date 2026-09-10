@@ -35,6 +35,7 @@ from tagger.storage import (
 )
 from tagger.tag_library.completion import attach_plain_text_tag_completer
 from tagger.tag_library.library import TagLibrary
+from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.config import DEFAULT_IMAGE_PREFETCH_COUNT
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
@@ -104,6 +105,11 @@ class BulkOperationDialog(QDialog):
 
         self._populate_tree()
         self._update_selection()
+        self._mouse_navigation = MouseNavigation(
+            self,
+            back=[self.previous_button, self.code_back_button],
+            forward=[self.selection_next_button, self.run_button, self.next_button],
+        )
 
     def _create_selection_page(self) -> QWidget:
         page = QWidget()
@@ -149,13 +155,13 @@ class BulkOperationDialog(QDialog):
         self.code_error_label.setStyleSheet("QLabel { color: #b42318; }")
         self.code_error_label.hide()
 
-        back_button = QPushButton("Back")
-        back_button.clicked.connect(self._show_selection_page)
+        self.code_back_button = QPushButton("Back")
+        self.code_back_button.clicked.connect(self._show_selection_page)
         self.run_button = QPushButton("Review Changes")
         self.run_button.clicked.connect(self._run_code)
 
         buttons = QHBoxLayout()
-        buttons.addWidget(back_button)
+        buttons.addWidget(self.code_back_button)
         buttons.addStretch(1)
         buttons.addWidget(self.run_button)
 

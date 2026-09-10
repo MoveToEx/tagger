@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from tagger.domain.models import ImageEntry
 from tagger.trash import SYSTEM_RECYCLE_BIN, UNLINK, delete_file
+from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.config import DEFAULT_IMAGE_PREFETCH_COUNT
 from tagger.ui.preview.loader import PreviewLoader
 
@@ -279,6 +280,9 @@ class DeleteFilterDialog(QDialog):
         self.next_button = QPushButton("Next")
         self.back_button.clicked.connect(self._back)
         self.next_button.clicked.connect(self._next)
+        self._mouse_navigation = MouseNavigation(
+            self, back=[self.back_button], forward=[self.next_button]
+        )
 
         self.cancel_button = QPushButton("Cancel")
         self.finish_button = QPushButton("Finish")

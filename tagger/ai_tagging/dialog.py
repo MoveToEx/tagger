@@ -38,6 +38,7 @@ from tagger.storage import (
     WriteRequest,
     write_tags_batch,
 )
+from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.config import DEFAULT_IMAGE_PREFETCH_COUNT
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
@@ -88,6 +89,9 @@ class AITaggingDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(self.pages)
         self._populate_images()
+        self._mouse_navigation = MouseNavigation(
+            self, back=[self.back_button], forward=[self.next_button]
+        )
 
     def _create_selection_page(self) -> QWidget:
         page = QWidget()

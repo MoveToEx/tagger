@@ -38,6 +38,7 @@ from tagger.storage import (
 )
 from tagger.tag_library.completion import attach_tag_completer
 from tagger.tag_library.library import TagLibrary
+from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.config import DEFAULT_IMAGE_PREFETCH_COUNT
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
@@ -167,6 +168,9 @@ class TraversalDialog(QDialog):
         self.stop_button = QPushButton("Stop")
         self.back_button.clicked.connect(self._back)
         self.next_button.clicked.connect(self._next)
+        self._mouse_navigation = MouseNavigation(
+            self, back=[self.back_button], forward=[self.next_button]
+        )
         self.apply_all_button.clicked.connect(self._apply_all)
         self.finish_button.clicked.connect(self._finish)
         self.stop_button.clicked.connect(self.reject)

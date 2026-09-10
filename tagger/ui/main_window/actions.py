@@ -12,6 +12,7 @@ from tagger.ai_tagging.dependencies import (
 )
 from tagger.domain.models import TagOperation
 from tagger.paths import PROJECT_ROOT
+from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.widgets import stabilize_checked_tool_button
 
 
@@ -109,6 +110,9 @@ class WindowActions:
         )
         self.previous_action.triggered.connect(lambda: self.window._move_selection(-1))
         self.next_action.triggered.connect(lambda: self.window._move_selection(1))
+        self._mouse_navigation = MouseNavigation(
+            self.window, back=[self.previous_action], forward=[self.next_action]
+        )
         self.last_action.triggered.connect(
             lambda: self.window._select_optional_row(self.window.catalog.last_image_row())
         )
