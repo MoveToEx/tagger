@@ -272,6 +272,7 @@ def test_image_context_menu_renames_selected_image_and_tag(
         "Rename...",
         "Delete",
         "",
+        "Edit",
         "Reveal in Explorer",
     ]
     assert menu.actions()[2].isSeparator()
@@ -414,11 +415,121 @@ def test_image_context_menu_reveals_selected_image_in_explorer(
     monkeypatch.setattr(window_files, "QProcess", FakeQProcess)
 
     menu = window.files._create_image_context_menu()
-    menu.actions()[3].trigger()
+    menu.actions()[4].trigger()
 
     assert started == [
         ("explorer.exe", ["/select,", str(image_path)]),
     ]
+
+
+def test_image_context_menu_edits_and_refreshes_displayed_image(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample image.png"
+    create_png(image_path)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    processes = []
+
+    class FakeSignal:
+        def __init__(self) -> None:
+            self.callback = None
+
+        def connect(self, callback) -> None:
+            self.callback = callback
+
+        def emit(self, *args) -> None:
+            assert self.callback is not None
+            self.callback(*args)
+
+    class FakeQProcess:
+        def __init__(self, parent) -> None:
+            assert parent is window
+            self.finished = FakeSignal()
+            self.errorOccurred = FakeSignal()
+            self.started_with = None
+            self.deleted = False
+            processes.append(self)
+
+        def start(self, program: str, arguments: list[str]) -> None:
+            self.started_with = (program, arguments)
+
+        def deleteLater(self) -> None:
+            self.deleted = True
+
+    monkeypatch.setattr(window_files, "QProcess", FakeQProcess)
+    cleared: list[bool] = []
+    loaded: list[Path] = []
+    monkeypatch.setattr(window.preview_loader, "clear", lambda: cleared.append(True))
+    monkeypatch.setattr(window.preview_loader, "load", loaded.append)
+
+    menu = window.files._create_image_context_menu()
+    menu.actions()[3].trigger()
+
+    assert len(processes) == 1
+    process = processes[0]
+    assert process.started_with == ("mspaint.exe", [str(image_path)])
+    assert process in window.files._image_editor_processes
+
+    process.finished.emit(0, None)
+
+    assert cleared == [True]
+    assert loaded == [image_path]
+    assert process.deleted
+    assert process not in window.files._image_editor_processes
+
+
+def test_image_editor_exit_does_not_refresh_another_displayed_image(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    create_png(first_path)
+    create_png(second_path)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    processes = []
+
+    class FakeSignal:
+        def __init__(self) -> None:
+            self.callback = None
+
+        def connect(self, callback) -> None:
+            self.callback = callback
+
+        def emit(self, *args) -> None:
+            assert self.callback is not None
+            self.callback(*args)
+
+    class FakeQProcess:
+        def __init__(self, _parent) -> None:
+            self.finished = FakeSignal()
+            self.errorOccurred = FakeSignal()
+            processes.append(self)
+
+        def start(self, _program: str, _arguments: list[str]) -> None:
+            pass
+
+        def deleteLater(self) -> None:
+            pass
+
+    monkeypatch.setattr(window_files, "QProcess", FakeQProcess)
+    window.files._edit_current_image()
+    window._select_row(1)
+    cleared: list[bool] = []
+    loaded: list[Path] = []
+    monkeypatch.setattr(window.preview_loader, "clear", lambda: cleared.append(True))
+    monkeypatch.setattr(window.preview_loader, "load", loaded.append)
+
+    processes[0].finished.emit(0, None)
+
+    current = window._current_entry()
+    assert current is not None
+    assert current.image_path == second_path
+    assert cleared == []
+    assert loaded == []
 
 
 def test_image_context_rename_collision_keeps_pair(

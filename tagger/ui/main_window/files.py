@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ class FileActions:
         self.window = window
         self._archive_dialog: ArchiveProgressDialog | None = None
         self._archive_destination: Path | None = None
+        self._image_editor_processes: set[QProcess] = set()
 
     def _tidy_folder(self) -> None:
         directory = self.window.directory
@@ -177,6 +179,9 @@ class FileActions:
 
     def _create_image_context_menu(self) -> QMenu:
         has_entry = self.window._current_entry() is not None and self.window.directory is not None
+        edit_action = QAction("Edit", self.window)
+        edit_action.setEnabled(has_entry)
+        edit_action.triggered.connect(self._edit_current_image)
         reveal_action = QAction("Reveal in Explorer", self.window)
         reveal_action.setEnabled(has_entry)
         reveal_action.triggered.connect(self._reveal_current_image_in_explorer)
@@ -190,8 +195,61 @@ class FileActions:
         menu.addAction(rename_action)
         menu.addAction(delete_action)
         menu.addSeparator()
+        menu.addAction(edit_action)
         menu.addAction(reveal_action)
         return menu
+
+    def _edit_current_image(self) -> None:
+        entry = self.window._current_entry()
+        if entry is None:
+            return
+
+        image_path = entry.image_path
+        process = QProcess(self.window)
+        process.finished.connect(
+            partial(self._image_editor_finished, process, image_path)
+        )
+        process.errorOccurred.connect(
+            partial(self._image_editor_error, process, image_path)
+        )
+        self._image_editor_processes.add(process)
+        process.start("mspaint.exe", [str(image_path)])
+
+    def _image_editor_finished(
+        self,
+        process: QProcess,
+        image_path: Path,
+        _exit_code: int,
+        _exit_status: QProcess.ExitStatus,
+    ) -> None:
+        self._release_image_editor_process(process)
+        entry = self.window._current_entry()
+        if entry is None or entry.image_path != image_path:
+            return
+
+        self.window.preview_loader.clear()
+        self.window.image_view.clear_image("Loading image...")
+        self.window._set_image_info(entry)
+        self.window.preview_loader.load(image_path)
+
+    def _image_editor_error(
+        self,
+        process: QProcess,
+        image_path: Path,
+        error: QProcess.ProcessError,
+    ) -> None:
+        if error != QProcess.ProcessError.FailedToStart:
+            return
+        self._release_image_editor_process(process)
+        QMessageBox.critical(
+            self.window,
+            "Could Not Open Image Editor",
+            f"Could not open {image_path.name} in Paint.",
+        )
+
+    def _release_image_editor_process(self, process: QProcess) -> None:
+        self._image_editor_processes.discard(process)
+        process.deleteLater()
 
     def _reveal_current_image_in_explorer(self) -> None:
         entry = self.window._current_entry()
