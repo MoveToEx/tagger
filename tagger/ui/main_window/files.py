@@ -13,7 +13,11 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_TIDY_SETTING,
     get_deletion_behavior,
 )
-from tagger.storage import find_unrecognized_files, rename_image_pair
+from tagger.storage import (
+    duplicate_image_pair,
+    find_unrecognized_files,
+    rename_image_pair,
+)
 from tagger.trash import UNLINK, delete_file
 from tagger.ui.dialogs.archive import ArchiveProgressDialog
 
@@ -188,11 +192,15 @@ class FileActions:
         rename_action = QAction("Rename...", self.window)
         rename_action.setEnabled(has_entry)
         rename_action.triggered.connect(self._rename_current_image_and_tag)
+        duplicate_action = QAction("Duplicate", self.window)
+        duplicate_action.setEnabled(has_entry)
+        duplicate_action.triggered.connect(self._duplicate_current_image_and_tag)
         delete_action = QAction("Delete", self.window)
         delete_action.setEnabled(has_entry)
         delete_action.triggered.connect(self._delete_current_image_and_tag)
         menu = QMenu(self.window)
         menu.addAction(rename_action)
+        menu.addAction(duplicate_action)
         menu.addAction(delete_action)
         menu.addSeparator()
         menu.addAction(edit_action)
@@ -310,6 +318,37 @@ class FileActions:
         )
         self.window.statusBar().showMessage(
             f"Renamed pair to {new_image_path.name} and {new_tag_path.name}.",
+            4000,
+        )
+
+    def _duplicate_current_image_and_tag(self) -> None:
+        entry = self.window._current_entry()
+        directory = self.window.directory
+        if entry is None or directory is None:
+            return
+
+        try:
+            new_image_path, new_tag_path = duplicate_image_pair(entry)
+        except OSError as exc:
+            self.window.folders._load_directory(
+                directory,
+                preferred_image=entry.image_path,
+                show_issues=False,
+            )
+            QMessageBox.critical(
+                self.window,
+                "Could Not Duplicate Image and Tag",
+                str(exc),
+            )
+            return
+
+        self.window.folders._load_directory(
+            directory,
+            preferred_image=new_image_path,
+            show_issues=False,
+        )
+        self.window.statusBar().showMessage(
+            f"Duplicated pair as {new_image_path.name} and {new_tag_path.name}.",
             4000,
         )
 

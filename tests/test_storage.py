@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from tagger.domain.models import ImageEntry
 from tagger.storage import (
     archive_entries,
     BatchPreflightError,
+    duplicate_image_pair,
     ExternalChangeError,
     WriteRequest,
     find_unrecognized_files,
@@ -218,6 +220,69 @@ def test_rename_image_pair_rolls_back_when_sidecar_rename_fails(
     assert tag_path.exists()
     assert not (tmp_path / "new.png").exists()
     assert not (tmp_path / "new.txt").exists()
+
+
+def test_duplicate_image_pair_copies_both_files_with_fixed_suffix(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "sample.PNG"
+    tag_path = tmp_path / "sample.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+
+    new_image_path, new_tag_path = duplicate_image_pair(
+        ImageEntry(image_path, tag_path)
+    )
+
+    assert new_image_path == tmp_path / "sample_2.PNG"
+    assert new_tag_path == tmp_path / "sample_2.txt"
+    assert new_image_path.read_bytes() == image_path.read_bytes()
+    assert new_tag_path.read_bytes() == tag_path.read_bytes()
+
+
+def test_duplicate_image_pair_rejects_collision_without_changes(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+    existing = tmp_path / "sample_2.PNG"
+    existing.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError, match="sample_2.png"):
+        duplicate_image_pair(ImageEntry(image_path, tag_path))
+
+    assert existing.read_bytes() == b"existing"
+    assert not (tmp_path / "sample_2.txt").exists()
+
+
+def test_duplicate_image_pair_rolls_back_when_sidecar_copy_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+    original_copyfileobj = shutil.copyfileobj
+    calls = 0
+
+    def fail_for_sidecar(source, destination) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise PermissionError("sidecar is locked")
+        original_copyfileobj(source, destination)
+
+    monkeypatch.setattr(shutil, "copyfileobj", fail_for_sidecar)
+
+    with pytest.raises(OSError, match="Could not duplicate sample.txt"):
+        duplicate_image_pair(ImageEntry(image_path, tag_path))
+
+    assert image_path.exists()
+    assert tag_path.exists()
+    assert not (tmp_path / "sample_2.png").exists()
+    assert not (tmp_path / "sample_2.txt").exists()
 
 
 def test_archive_entries_stores_nested_pairs_with_unique_flat_names(

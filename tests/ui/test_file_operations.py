@@ -270,12 +270,13 @@ def test_image_context_menu_renames_selected_image_and_tag(
     menu = window.files._create_image_context_menu()
     assert [action.text() for action in menu.actions()] == [
         "Rename...",
+        "Duplicate",
         "Delete",
         "",
         "Edit",
         "Reveal in Explorer",
     ]
-    assert menu.actions()[2].isSeparator()
+    assert menu.actions()[3].isSeparator()
     menu.actions()[0].trigger()
 
     assert not image_path.exists()
@@ -286,6 +287,33 @@ def test_image_context_menu_renames_selected_image_and_tag(
     assert current is not None
     assert current.image_path == tmp_path / "renamed.png"
     assert "Renamed pair to renamed.png and renamed.txt" in (
+        window.statusBar().currentMessage()
+    )
+
+
+def test_image_context_menu_duplicates_selected_image_and_tag(
+    qtbot, tmp_path: Path
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_bytes(b"cat\n")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+
+    menu = window.files._create_image_context_menu()
+    menu.actions()[1].trigger()
+
+    new_image_path = tmp_path / "sample_2.png"
+    new_tag_path = tmp_path / "sample_2.txt"
+    assert new_image_path.read_bytes() == image_path.read_bytes()
+    assert new_tag_path.read_bytes() == tag_path.read_bytes()
+    assert window.catalog.image_count == 2
+    current = window._current_entry()
+    assert current is not None
+    assert current.image_path == new_image_path
+    assert "Duplicated pair as sample_2.png and sample_2.txt" in (
         window.statusBar().currentMessage()
     )
 
@@ -415,7 +443,7 @@ def test_image_context_menu_reveals_selected_image_in_explorer(
     monkeypatch.setattr(window_files, "QProcess", FakeQProcess)
 
     menu = window.files._create_image_context_menu()
-    menu.actions()[4].trigger()
+    menu.actions()[5].trigger()
 
     assert started == [
         ("explorer.exe", ["/select,", str(image_path)]),
@@ -465,7 +493,7 @@ def test_image_context_menu_edits_and_refreshes_displayed_image(
     monkeypatch.setattr(window.preview_loader, "load", loaded.append)
 
     menu = window.files._create_image_context_menu()
-    menu.actions()[3].trigger()
+    menu.actions()[4].trigger()
 
     assert len(processes) == 1
     process = processes[0]

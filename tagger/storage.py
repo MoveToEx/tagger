@@ -294,6 +294,66 @@ def rename_image_pair(
     return new_image_path, new_tag_path
 
 
+def _copy_file_exclusive(source: Path, destination: Path) -> None:
+    created = False
+    try:
+        with source.open("rb") as source_stream:
+            with destination.open("xb") as destination_stream:
+                created = True
+                shutil.copyfileobj(source_stream, destination_stream)
+        shutil.copystat(source, destination)
+    except OSError as exc:
+        if created:
+            try:
+                destination.unlink()
+            except OSError as cleanup_exc:
+                raise OSError(
+                    f"{exc}. The partial copy {destination.name} could not be "
+                    f"removed: {cleanup_exc}"
+                ) from exc
+        raise
+
+
+def duplicate_image_pair(entry: ImageEntry) -> tuple[Path, Path]:
+    """Copy an image and its sidecar using a fixed ``_2`` suffix."""
+    image_path = Path(entry.image_path)
+    tag_path = Path(entry.tag_path)
+    new_stem = f"{image_path.stem}_2"
+    new_image_path = image_path.with_name(f"{new_stem}{image_path.suffix}")
+    new_tag_path = tag_path.with_name(f"{new_stem}.txt")
+
+    for source in (image_path, tag_path):
+        if not source.is_file():
+            raise FileNotFoundError(f"File does not exist: {source}")
+
+    for destination in (new_image_path, new_tag_path):
+        for sibling in destination.parent.iterdir():
+            if sibling.name.casefold() == destination.name.casefold():
+                raise FileExistsError(
+                    f"A file named {destination.name} already exists."
+                )
+
+    try:
+        _copy_file_exclusive(image_path, new_image_path)
+    except OSError as exc:
+        raise OSError(f"Could not duplicate {image_path.name}: {exc}") from exc
+
+    try:
+        _copy_file_exclusive(tag_path, new_tag_path)
+    except OSError as exc:
+        try:
+            new_image_path.unlink()
+        except OSError as rollback_exc:
+            raise OSError(
+                f"Could not duplicate {tag_path.name}: {exc}. The image copy "
+                f"was left as {new_image_path.name} because rollback failed: "
+                f"{rollback_exc}"
+            ) from exc
+        raise OSError(f"Could not duplicate {tag_path.name}: {exc}") from exc
+
+    return new_image_path, new_tag_path
+
+
 def archive_entries(
     entries: Sequence[ImageEntry],
     destination: Path,
