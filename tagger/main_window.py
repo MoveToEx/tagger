@@ -54,6 +54,7 @@ from .ai_tagger import (
     missing_ai_dependencies,
 )
 from .bulk_operation import BulkOperationDialog
+from .deduplicate import DeduplicateDialog
 from .catalog import ImageCatalogModel
 from .complex_filter import ComplexFilterDialog
 from .delete_filter import DeleteFilterDialog
@@ -74,6 +75,7 @@ from .settings import (
     PARENTHESES_SETTING,
     UNDERSCORES_SETTING,
     USE_UNLINK_FOR_DELETE_FILTER_SETTING,
+    USE_UNLINK_FOR_DEDUPLICATE_SETTING,
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
     SettingsDialog,
@@ -289,6 +291,9 @@ class MainWindow(QMainWindow):
         self.delete_filter_action = QAction("Delete Filter...", self)
         self.delete_filter_action.triggered.connect(self._open_delete_filter)
 
+        self.deduplicate_action = QAction("Deduplicate...", self)
+        self.deduplicate_action.triggered.connect(self._open_deduplicate)
+
         self.settings_action = QAction("Settings...", self)
         self.settings_action.triggered.connect(self._open_settings)
 
@@ -403,6 +408,7 @@ class MainWindow(QMainWindow):
         )
         image_menu = self.menuBar().addMenu("&Image")
         image_menu.addAction(self.delete_filter_action)
+        image_menu.addAction(self.deduplicate_action)
         tags_menu = self.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
         tags_menu.addAction(self.review_action)
@@ -1051,6 +1057,37 @@ class MainWindow(QMainWindow):
                     4000,
                 )
 
+    def _open_deduplicate(self) -> None:
+        if self.directory is None or len(self.catalog.entries) < 2:
+            return
+        current = self._current_entry()
+        deletion_behavior = get_deletion_behavior(
+            self.settings, USE_UNLINK_FOR_DEDUPLICATE_SETTING
+        )
+        dialog = DeduplicateDialog(
+            self.catalog.entries,
+            self,
+            root_directory=self.directory,
+            deletion_behavior=deletion_behavior,
+        )
+        if (
+            dialog.exec() == DeduplicateDialog.DialogCode.Accepted
+            and dialog.commit_result is not None
+        ):
+            self._load_directory(
+                self.directory,
+                preferred_image=current.image_path if current else None,
+                show_issues=False,
+            )
+            action = (
+                "Permanently deleted"
+                if deletion_behavior == UNLINK else "Moved to Recycle Bin"
+            )
+            self.statusBar().showMessage(
+                f"{action} {len(dialog.commit_result.deleted_images)} duplicate image(s).",
+                4000,
+            )
+
     def _open_complex_filter(self) -> None:
         if not self.catalog.entries:
             return
@@ -1614,6 +1651,7 @@ class MainWindow(QMainWindow):
         self.search_input.setEnabled(count > 0)
         self.global_search_action.setEnabled(count > 0)
         self.delete_filter_action.setEnabled(count > 0)
+        self.deduplicate_action.setEnabled(count >= 2)
         self.review_action.setEnabled(count > 0 and any(entry.editable and entry.tags for entry in self.catalog.entries))
         self.complex_filter_action.setEnabled(count > 0)
         has_previous = (

@@ -69,6 +69,7 @@ OPEN_RECENT_FOLDER_ON_STARTUP_SETTING = (
 USE_UNLINK_FOR_DELETE_FILTER_SETTING = "general/use_unlink_for_delete_filter"
 USE_UNLINK_FOR_MANUAL_DELETE_SETTING = "general/use_unlink_for_manual_delete"
 USE_UNLINK_FOR_TIDY_SETTING = "general/use_unlink_for_tidy"
+USE_UNLINK_FOR_DEDUPLICATE_SETTING = "general/use_unlink_for_deduplicate"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 NO_PROXY = "none"
@@ -297,6 +298,7 @@ class SettingsDialog(QDialog):
                 self.settings, USE_UNLINK_FOR_MANUAL_DELETE_SETTING
             ),
             get_use_unlink(self.settings, USE_UNLINK_FOR_TIDY_SETTING),
+            get_use_unlink(self.settings, USE_UNLINK_FOR_DEDUPLICATE_SETTING),
         )
         self.setWindowTitle("Settings")
         self.resize(760, 520)
@@ -458,10 +460,15 @@ class SettingsDialog(QDialog):
         self.tidy_use_unlink_checkbox.setChecked(
             self._applied_use_unlink_options[2]
         )
+        self.deduplicate_use_unlink_checkbox = QCheckBox("Deduplicate")
+        self.deduplicate_use_unlink_checkbox.setChecked(
+            self._applied_use_unlink_options[3]
+        )
         for checkbox in (
             self.delete_filter_use_unlink_checkbox,
             self.manual_delete_use_unlink_checkbox,
             self.tidy_use_unlink_checkbox,
+            self.deduplicate_use_unlink_checkbox,
         ):
             _stabilize_checkbox(checkbox)
 
@@ -473,6 +480,7 @@ class SettingsDialog(QDialog):
             self.manual_delete_use_unlink_checkbox
         )
         deletion_options_layout.addWidget(self.tidy_use_unlink_checkbox)
+        deletion_options_layout.addWidget(self.deduplicate_use_unlink_checkbox)
         deletion_options_layout.addStretch(1)
 
         self.recycle_bin_default_label = QLabel(
@@ -508,6 +516,9 @@ class SettingsDialog(QDialog):
             self._settings_changed
         )
         self.tidy_use_unlink_checkbox.toggled.connect(
+            self._settings_changed
+        )
+        self.deduplicate_use_unlink_checkbox.toggled.connect(
             self._settings_changed
         )
         return page
@@ -737,11 +748,12 @@ class SettingsDialog(QDialog):
         behavior = self.scrolling_behavior_input.currentData()
         return behavior if isinstance(behavior, str) else SCROLL_PAN
 
-    def _use_unlink_options(self) -> tuple[bool, bool, bool]:
+    def _use_unlink_options(self) -> tuple[bool, bool, bool, bool]:
         return (
             self.delete_filter_use_unlink_checkbox.isChecked(),
             self.manual_delete_use_unlink_checkbox.isChecked(),
             self.tidy_use_unlink_checkbox.isChecked(),
+            self.deduplicate_use_unlink_checkbox.isChecked(),
         )
 
     def _proxy_preferences(self) -> tuple[str, str]:
@@ -786,6 +798,10 @@ class SettingsDialog(QDialog):
         self.settings.setValue(
             USE_UNLINK_FOR_TIDY_SETTING,
             use_unlink_options[2],
+        )
+        self.settings.setValue(
+            USE_UNLINK_FOR_DEDUPLICATE_SETTING,
+            use_unlink_options[3],
         )
         self.settings.setValue(PROXY_MODE_SETTING, proxy_mode)
         self.settings.setValue(PROXY_SETTING, proxy_url)

@@ -82,6 +82,7 @@ from tagger.settings import (
     SettingsDialog,
     UNDERSCORES_SETTING,
     USE_UNLINK_FOR_DELETE_FILTER_SETTING,
+    USE_UNLINK_FOR_DEDUPLICATE_SETTING,
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
     get_deletion_behavior,
@@ -514,11 +515,13 @@ def test_general_settings_stages_use_unlink_options(
         dialog.delete_filter_use_unlink_checkbox,
         dialog.manual_delete_use_unlink_checkbox,
         dialog.tidy_use_unlink_checkbox,
+        dialog.deduplicate_use_unlink_checkbox,
     ]
     assert [checkbox.text() for checkbox in checkboxes] == [
         "Delete filter",
         "Manual delete",
         "Tidy",
+        "Deduplicate",
     ]
     deletion_layout = dialog.deletion_behavior_group.layout()
     assert deletion_layout is not None
@@ -527,7 +530,7 @@ def test_general_settings_stages_use_unlink_options(
     checkbox_layout = checkbox_layout_item.layout()
     assert checkbox_layout is not None
     arranged_checkboxes = []
-    for index in range(3):
+    for index in range(4):
         checkbox_item = checkbox_layout.itemAt(index)
         assert checkbox_item is not None
         arranged_checkboxes.append(checkbox_item.widget())
@@ -541,6 +544,13 @@ def test_general_settings_stages_use_unlink_options(
     )
     assert dialog.delete_filter_use_unlink_checkbox.isChecked()
     assert not dialog.manual_delete_use_unlink_checkbox.isChecked()
+    assert not dialog.deduplicate_use_unlink_checkbox.isChecked()
+
+    dialog.deduplicate_use_unlink_checkbox.setChecked(True)
+    assert dialog.apply_button.isEnabled()
+    assert get_deletion_behavior(
+        settings, USE_UNLINK_FOR_DEDUPLICATE_SETTING
+    ) == SYSTEM_RECYCLE_BIN
 
     dialog.delete_filter_use_unlink_checkbox.setChecked(False)
     dialog.manual_delete_use_unlink_checkbox.setChecked(True)
@@ -572,6 +582,18 @@ def test_general_settings_stages_use_unlink_options(
         persisted, USE_UNLINK_FOR_MANUAL_DELETE_SETTING
     ) == UNLINK
     assert not dialog.apply_button.isEnabled()
+
+    assert get_deletion_behavior(
+        persisted, USE_UNLINK_FOR_DEDUPLICATE_SETTING
+    ) == UNLINK
+    reopened = SettingsDialog(settings=persisted)
+    qtbot.addWidget(reopened)
+    assert reopened.deduplicate_use_unlink_checkbox.isChecked()
+    reopened.deduplicate_use_unlink_checkbox.setChecked(False)
+    reopened.reject()
+    assert get_deletion_behavior(
+        JsonSettings(settings_path), USE_UNLINK_FOR_DEDUPLICATE_SETTING
+    ) == UNLINK
 
 
 def test_general_settings_ignores_legacy_deletion_behavior(
@@ -1924,7 +1946,7 @@ def test_image_menu_exposes_delete_filter_for_open_folder(
         for menu in window.menuBar().findChildren(QMenu)
         if menu.title() == "&Image"
     )
-    assert image_menu.actions() == [window.delete_filter_action]
+    assert image_menu.actions() == [window.delete_filter_action, window.deduplicate_action]
     assert window.delete_filter_action.text() == "Delete Filter..."
     assert not window.delete_filter_action.isEnabled()
 

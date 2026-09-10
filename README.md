@@ -71,6 +71,22 @@ _Tags_ > _Review Tags_ allows you to thoroughly review tags within a folder and 
 
 Decisions are stored in memory and are committed only when the revision finishes.  
 
+#### Deduplicate
+
+_Image_ > _Deduplicate_ finds similar images in the checked folders and images.
+Choose a perceptual-hash distance threshold: Exact (0), Very similar (1),
+Similar (2), or Speculative (4). Exact compares perceptual hashes, not file bytes.
+
+Review each pair side by side and choose Keep Left, Keep Right, or Keep Both.
+Previous and Next only navigate; saved choices can be revisited and changed.
+Pairs involving images already marked for deletion are skipped. Finish is
+available at any point during review and moves marked images and their tag files
+to the system Recycle Bin, keeping undecided images. Cancel discards the choices
+without deleting files.
+
+To permanently delete duplicates instead, enable _Deduplicate_ under
+_Settings_ > _General_ > _Deletion behavior_ > _Use unlink for..._.
+
 #### AI tagging
 
 _Tags_ > _AI Tagging_ allows you to tag images with AI models.  
