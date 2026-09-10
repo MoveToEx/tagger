@@ -5,6 +5,8 @@ import threading
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from PySide6.QtCore import (
     QItemSelectionModel,
     QMimeData,
@@ -2824,6 +2826,85 @@ def test_tag_context_copy_uses_comma_space_separator(qtbot, tmp_path: Path) -> N
     window._copy_selected_tags()
 
     assert QGuiApplication.clipboard().text() == "dog, bird"
+
+
+@pytest.mark.parametrize(
+    ("label", "operation"),
+    [
+        ("Add tags", TagOperation.ADD),
+        ("Delete tags", TagOperation.DELETE),
+        ("Toggle tags", TagOperation.TOGGLE),
+    ],
+)
+@pytest.mark.parametrize("selected_rows", [(1,), (2, 0)])
+def test_tag_context_send_to_prefills_traversal(
+    qtbot, tmp_path: Path, monkeypatch, label, operation, selected_rows
+) -> None:
+    create_png(tmp_path / "sample.png")
+    tag_path = tmp_path / "sample.txt"
+    tag_path.write_text("dog, cat, blue sky\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    window.tag_list.clearSelection()
+    for row in selected_rows:
+        window.tag_list.item(row).setSelected(True)
+    opened: list[tuple[TagOperation, str]] = []
+
+    def inspect_dialog(dialog):
+        qtbot.addWidget(dialog)
+        opened.append((dialog._operation, dialog.tag_input.text()))
+        assert not dialog._started
+        return TraversalDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(TraversalDialog, "exec", inspect_dialog)
+    menu = window._create_tag_context_menu()
+    assert menu.actions()[-2].isSeparator()
+    send_to = menu.actions()[-1].menu()
+    assert isinstance(send_to, QMenu)
+    assert send_to.title() == "Send to"
+    assert [action.text() for action in send_to.actions()] == [
+        "Add tags", "Delete tags", "Toggle tags", "Global search"
+    ]
+    next(action for action in send_to.actions() if action.text() == label).trigger()
+
+    expected_tags = ", ".join(
+        window.tag_list.item(row).text() for row in sorted(selected_rows)
+    )
+    assert opened == [(operation, expected_tags)]
+    assert tag_path.read_text(encoding="utf-8") == "dog, cat, blue sky\n"
+
+
+@pytest.mark.parametrize("selected_rows", [(), (2,), (0, 2)])
+def test_tag_context_send_to_global_search_requires_one_tag(
+    qtbot, tmp_path: Path, monkeypatch, selected_rows
+) -> None:
+    create_png(tmp_path / "sample.png")
+    (tmp_path / "sample.txt").write_text("dog, cat, blue sky\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._load_directory(tmp_path, show_issues=False)
+    window.tag_list.clearSelection()
+    for row in selected_rows:
+        window.tag_list.item(row).setSelected(True)
+    opened: list[str] = []
+
+    def inspect_dialog(dialog):
+        qtbot.addWidget(dialog)
+        opened.append(dialog.pattern_input.text())
+        return GlobalTagSearchDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(GlobalTagSearchDialog, "exec", inspect_dialog)
+    send_to = window._create_tag_context_menu().actions()[-1].menu()
+    assert isinstance(send_to, QMenu)
+    assert send_to.isEnabled() == bool(selected_rows)
+    search_action = send_to.actions()[-1]
+    assert search_action.isEnabled() == (len(selected_rows) == 1)
+    search_action.trigger()
+    assert opened == (["blue sky"] if len(selected_rows) == 1 else [])
+
+    window.global_search_action.trigger()
+    assert opened[-1] == ""
 
 
 def test_main_tag_deletion_requires_confirmation_from_button_and_context_menu(

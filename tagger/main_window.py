@@ -988,13 +988,14 @@ class MainWindow(QMainWindow):
         self.search_input.setFocus()
         self.search_input.selectAll()
 
-    def _open_global_search(self) -> None:
+    def _open_global_search(self, *, initial_pattern: str = "") -> None:
         if not self.catalog.entries:
             return
         GlobalTagSearchDialog(
             self.catalog.entries,
             self,
             tag_library=self.tag_library,
+            initial_pattern=initial_pattern,
         ).exec()
 
     def _open_review(self) -> None:
@@ -1429,6 +1430,31 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction(copy_action)
         menu.addAction(delete_action)
+        menu.addSeparator()
+        send_to_menu = QMenu("Send to", menu)
+        menu.addMenu(send_to_menu)
+        selected_tags = [
+            self.tag_list.item(row).text()
+            for row in range(self.tag_list.count())
+            if self.tag_list.item(row).isSelected()
+        ]
+        send_to_menu.setEnabled(bool(selected_tags))
+        for operation, label in (
+            (TagOperation.ADD, "Add tags"),
+            (TagOperation.DELETE, "Delete tags"),
+            (TagOperation.TOGGLE, "Toggle tags"),
+        ):
+            action = send_to_menu.addAction(label)
+            action.triggered.connect(
+                lambda checked=False, op=operation: self._start_traversal(
+                    op, requested_tags=selected_tags
+                )
+            )
+        search_action = send_to_menu.addAction("Global search")
+        search_action.setEnabled(len(selected_tags) == 1)
+        search_action.triggered.connect(
+            lambda: self._open_global_search(initial_pattern=selected_tags[0])
+        )
         return menu
 
     def _apply_current_operation(
@@ -1459,7 +1485,9 @@ class MainWindow(QMainWindow):
         self.tag_input.clear()
         self.statusBar().showMessage(f"Saved {entry.tag_path.name}", 3000)
 
-    def _start_traversal(self, operation: TagOperation) -> None:
+    def _start_traversal(
+        self, operation: TagOperation, *, requested_tags: list[str] | None = None
+    ) -> None:
         if operation == TagOperation.NORMALIZE:
             raise ValueError("Normalization is not a traversal operation.")
         editable_entries = [entry for entry in self.catalog.entries if entry.editable]
@@ -1473,6 +1501,7 @@ class MainWindow(QMainWindow):
         dialog = TraversalDialog(
             editable_entries,
             operation,
+            requested_tags=requested_tags,
             parent=self,
             root_directory=self.directory,
             tag_library=self.tag_library,

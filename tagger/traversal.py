@@ -40,6 +40,7 @@ from .storage import (
     write_tags_batch,
 )
 from .tag_library import TagLibrary, attach_tag_completer
+from .widgets import stabilize_widget_size
 
 
 def _folder_ancestors(path: Path) -> list[Path]:
@@ -240,6 +241,7 @@ class TraversalDialog(QDialog):
             self.traversal_widget.hide()
             self.tag_input.setFocus()
             self.tag_input.selectAll()
+        stabilize_widget_size(self.tag_input, minimum_width=426)
 
     @property
     def session(self) -> TraversalSession:

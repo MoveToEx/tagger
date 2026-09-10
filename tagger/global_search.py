@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from .domain import ImageEntry, matching_tag_counts
 from .tag_library import TagLibrary, attach_tag_completer
+from .widgets import stabilize_widget_size
 
 
 class GlobalTagSearchDialog(QDialog):
@@ -30,6 +31,7 @@ class GlobalTagSearchDialog(QDialog):
         parent: QWidget | None = None,
         *,
         tag_library: TagLibrary | None = None,
+        initial_pattern: str = "",
     ) -> None:
         super().__init__(parent)
         self.entries = list(entries)
@@ -45,13 +47,16 @@ class GlobalTagSearchDialog(QDialog):
         self.pattern_completer = attach_tag_completer(
             self.pattern_input, tag_library
         )
+        self.pattern_input.setText(initial_pattern)
+        stabilize_widget_size(self.pattern_input, minimum_width=360)
         self.search_button = QPushButton("Search")
         self.pattern_input.returnPressed.connect(self.search)
         self.search_button.clicked.connect(self.search)
 
         search_layout = QHBoxLayout()
-        search_layout.addWidget(self.pattern_input, 1)
+        search_layout.addWidget(self.pattern_input)
         search_layout.addWidget(self.search_button)
+        search_layout.addStretch()
 
         self.count_label = QLabel("Enter a tag pattern to search.")
         self.count_label.setTextInteractionFlags(
