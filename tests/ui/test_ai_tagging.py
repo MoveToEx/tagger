@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
+import sys
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QProcess, Qt
 
 import tagger.ai_tagging.cache as ai_cache
 import tagger.ai_tagging.dependencies as ai_dependencies
+import tagger.ai_tagging.inference as ai_inference
 from tagger.ai_tagging.dialog import AITaggingDialog
 from tagger.ai_tagging.model_dialog import ModelManagementDialog
 import tagger.ai_tagging.model_dialog as model_dialog_module
@@ -18,6 +22,85 @@ from .helpers import (
     create_png,
     render_spin_box_control,
 )
+
+
+def test_inference_controller_does_not_import_torch() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import tagger.ai_tagging.inference; "
+                "print('torch' in sys.modules)"
+            ),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "False"
+
+
+def test_inference_results_are_emitted_after_subprocess_exit(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    worker_module = tmp_path / "fake_ai_inference_worker.py"
+    worker_module.write_text(
+        """\
+import json
+import sys
+
+request = json.load(sys.stdin)
+path = request["image_paths"][0]
+prefix = "TAGGER_AI:"
+print(prefix + json.dumps({"type": "progress", "value": 0, "total": 1, "message": "Loading model..."}), flush=True)
+print(prefix + json.dumps({"type": "result", "path": path, "tags": [["cat", 0.9]]}), flush=True)
+print(prefix + json.dumps({"type": "completed"}), flush=True)
+""",
+        encoding="utf-8",
+    )
+    python_path = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join(
+            [str(tmp_path), python_path] if python_path else [str(tmp_path)]
+        ),
+    )
+    monkeypatch.setattr(
+        ai_inference, "_WORKER_MODULE", "fake_ai_inference_worker"
+    )
+    image_path = tmp_path / "image.png"
+    controller = ai_inference._InferenceProcess(
+        [image_path],
+        "example/model",
+        0.35,
+        0.75,
+        None,
+    )
+    progress: list[tuple[int, int, str]] = []
+    completed: list[object] = []
+    completion_states: list[QProcess.ProcessState] = []
+    failures: list[str] = []
+
+    def inference_completed(results: object) -> None:
+        completed.append(results)
+        completion_states.append(controller._process.state())
+
+    controller.progress.connect(
+        lambda value, total, message: progress.append((value, total, message))
+    )
+    controller.completed.connect(inference_completed)
+    controller.failed.connect(failures.append)
+
+    controller.start()
+    qtbot.waitUntil(lambda: bool(completed or failures), timeout=5_000)
+
+    assert failures == []
+    assert progress == [(0, 1, "Loading model...")]
+    assert completed == [{str(image_path): [("cat", 0.9)]}]
+    assert completion_states == [QProcess.ProcessState.NotRunning]
 
 
 def test_ai_dependency_availability_is_cached(monkeypatch) -> None:

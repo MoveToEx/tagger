@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import override
 
-from PySide6.QtCore import QEvent, QObject, QThread, Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tagger.ai_tagging.inference import _InferenceWorker
+from tagger.ai_tagging.inference import _InferenceProcess
 from tagger.ai_tagging.models import MODEL_REPOSITORIES
 from tagger.domain.models import ImageEntry
 from tagger.domain.tags import normalize_tags
@@ -73,8 +73,7 @@ class AITaggingDialog(QDialog):
         self._selected_additions: dict[int, list[str]] = {}
         self._current_index = 0
         self._image_prefetch_count = max(0, image_prefetch_count)
-        self._thread: QThread | None = None
-        self._worker: _InferenceWorker | None = None
+        self._inference_process: _InferenceProcess | None = None
         self.commit_result: BatchCommitResult | None = None
 
         self.setWindowTitle("AI Tagging")
@@ -371,7 +370,7 @@ class AITaggingDialog(QDialog):
         )
 
     def _start_inference(self) -> None:
-        if self._thread is not None:
+        if self._inference_process is not None:
             return
         entries = self._checked_entries()
         repo_id = self.model_input.currentData()
@@ -380,28 +379,22 @@ class AITaggingDialog(QDialog):
         self._selected_entries = entries
         self.inference_progress.setRange(0, len(entries))
         self.inference_progress.setValue(0)
+        self.inference_status.setText("Preparing inference...")
         self.pages.setCurrentWidget(self.progress_page)
-        thread = QThread(self)
-        worker = _InferenceWorker(
+        process = _InferenceProcess(
             [entry.image_path for entry in entries],
             repo_id,
             self.general_threshold_input.value(),
             self.character_threshold_input.value(),
             self._proxy,
             cache._preferred_model_cache_directory(repo_id),
+            self,
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._inference_progressed)
-        worker.completed.connect(self._inference_completed)
-        worker.failed.connect(self._inference_failed)
-        worker.completed.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._thread_finished)
-        self._thread = thread
-        self._worker = worker
-        thread.start()
+        process.progress.connect(self._inference_progressed)
+        process.completed.connect(self._inference_completed)
+        process.failed.connect(self._inference_failed)
+        self._inference_process = process
+        process.start()
 
     def _inference_progressed(self, value: int, total: int, message: str) -> None:
         self.inference_progress.setRange(0, total)
@@ -409,6 +402,7 @@ class AITaggingDialog(QDialog):
         self.inference_status.setText(message)
 
     def _inference_completed(self, results: object) -> None:
+        self._release_inference_process()
         self._results = dict(results) if isinstance(results, dict) else {}
         self._selected_additions.clear()
         self._current_index = 0
@@ -416,12 +410,15 @@ class AITaggingDialog(QDialog):
         self._load_current()
 
     def _inference_failed(self, message: str) -> None:
+        self._release_inference_process()
         self.pages.setCurrentWidget(self.selection_page)
         QMessageBox.critical(self, "AI Inference Failed", message)
 
-    def _thread_finished(self) -> None:
-        self._thread = None
-        self._worker = None
+    def _release_inference_process(self) -> None:
+        process = self._inference_process
+        self._inference_process = None
+        if process is not None:
+            process.deleteLater()
 
     def _load_current(self) -> None:
         entry = self._selected_entries[self._current_index]
@@ -587,12 +584,12 @@ class AITaggingDialog(QDialog):
 
     @override
     def reject(self) -> None:
-        if self._thread is None:
+        if self._inference_process is None:
             super().reject()
 
     @override
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._thread is None:
+        if self._inference_process is None:
             event.accept()
         else:
             event.ignore()

@@ -96,7 +96,10 @@ This requires the `ai-tagger` dependency group to be installed. If not, the menu
 To use AI tagging, select and download models in the settings window.  
 This app recognizes models from both hf cache folder and local `data/model` folder, so you can also download models using hf-cli outside of the app.  
 
-After selecting images and inference parameters the app will start inference. The heavy dependencies used here are imported lazily to speed up startup, so preparation step might take longer.  
+After selecting images and inference parameters the app will start inference in a
+separate process. The process exits after inference so PyTorch, the model, and GPU
+memory are released before review begins. Model loading makes the preparation step
+take longer each time inference is run.
 
 After inference completes, you are supposed to check tags one by one. You can use shortcuts from the traversal window here.
 
