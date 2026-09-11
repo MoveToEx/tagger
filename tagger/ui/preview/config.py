@@ -3,11 +3,13 @@ from __future__ import annotations
 
 SCROLL_NAVIGATE = "navigate"
 SCROLL_PAN = "pan"
+SCROLL_NAVIGATE_WHEN_FITTED = "navigate_when_fitted"
 SCROLL_NAVIGATE_AT_END = "navigate_at_end"
 SCROLL_ZOOM = "zoom"
 SCROLLING_BEHAVIORS = {
     SCROLL_NAVIGATE,
     SCROLL_PAN,
+    SCROLL_NAVIGATE_WHEN_FITTED,
     SCROLL_NAVIGATE_AT_END,
     SCROLL_ZOOM,
 }

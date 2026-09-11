@@ -29,7 +29,12 @@ from tagger.tag_library.download_dialog import DownloadTagsDialog
 from tagger.tag_library.format import write_tag_library
 from tagger.tag_library.library import TagLibrary
 from tagger.trash import SYSTEM_RECYCLE_BIN, UNLINK
-from tagger.ui.preview.config import SCROLL_NAVIGATE, SCROLL_NAVIGATE_AT_END, SCROLL_PAN
+from tagger.ui.preview.config import (
+    SCROLL_NAVIGATE,
+    SCROLL_NAVIGATE_AT_END,
+    SCROLL_NAVIGATE_WHEN_FITTED,
+    SCROLL_PAN,
+)
 
 from .helpers import assert_stable_widget_size
 
@@ -92,7 +97,13 @@ def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> No
     assert [
         dialog.scrolling_behavior_input.itemText(index)
         for index in range(dialog.scrolling_behavior_input.count())
-    ] == ["Navigate", "Pan", "Pan, Navigate at end", "Zoom"]
+    ] == [
+        "Navigate",
+        "Pan",
+        "Pan, Navigate when fitted to window",
+        "Pan, Navigate at end",
+        "Zoom",
+    ]
     assert dialog.scrolling_behavior_input.currentData() == SCROLL_NAVIGATE_AT_END
 
     dialog.scrolling_behavior_input.setCurrentIndex(
@@ -107,6 +118,17 @@ def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> No
     assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE
     assert get_scrolling_behavior(JsonSettings(settings_path)) == SCROLL_NAVIGATE
     assert applied == [SCROLL_NAVIGATE]
+
+
+def test_scrolling_behavior_accepts_navigate_when_fitted(
+    tmp_path: Path,
+) -> None:
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(
+        SCROLLING_BEHAVIOR_SETTING, SCROLL_NAVIGATE_WHEN_FITTED
+    )
+
+    assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE_WHEN_FITTED
 
 
 def test_general_settings_stages_traversal_image_prefetch_count(

@@ -5,7 +5,12 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QWheelEvent
 
-from tagger.ui.preview.config import SCROLL_NAVIGATE_AT_END, SCROLL_PAN, SCROLL_ZOOM
+from tagger.ui.preview.config import (
+    SCROLL_NAVIGATE_AT_END,
+    SCROLL_NAVIGATE_WHEN_FITTED,
+    SCROLL_PAN,
+    SCROLL_ZOOM,
+)
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
 
@@ -101,6 +106,52 @@ def test_navigate_at_end_scrolls_until_directional_boundary_then_navigates(
     QGuiApplication.sendEvent(view.viewport(), previous_event)
 
     assert navigation == [1, -1]
+
+
+def test_navigate_when_fitted_pans_only_outside_fit_to_window(qtbot) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    image = QImage(800, 1200, QImage.Format.Format_RGB32)
+    image.fill(QColor("#2f6fed"))
+    view.resize(400, 300)
+    view.set_image(image)
+    view.set_scrolling_behavior(SCROLL_NAVIGATE_WHEN_FITTED)
+    view.show()
+    qtbot.waitExposed(view)
+    navigation: list[int] = []
+    view.navigation_requested.connect(navigation.append)
+
+    fitted_event = QWheelEvent(
+        view.viewport().rect().center(),
+        view.viewport().mapToGlobal(view.viewport().rect().center()),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QGuiApplication.sendEvent(view.viewport(), fitted_event)
+
+    assert navigation == [1]
+
+    view.set_fit_to_window(False)
+    scrollbar = view.verticalScrollBar()
+    initial_value = scrollbar.value()
+    pan_event = QWheelEvent(
+        view.viewport().rect().center(),
+        view.viewport().mapToGlobal(view.viewport().rect().center()),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QGuiApplication.sendEvent(view.viewport(), pan_event)
+
+    assert scrollbar.value() > initial_value
+    assert navigation == [1]
 
 
 def test_image_view_zoom_scroll_and_drag_pan(qtbot) -> None:

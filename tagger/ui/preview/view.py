@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QLabel, QScrollArea
 from tagger.ui.preview.config import (
     SCROLLING_BEHAVIORS,
     SCROLL_NAVIGATE_AT_END,
+    SCROLL_NAVIGATE_WHEN_FITTED,
     SCROLL_PAN,
     SCROLL_ZOOM,
 )
@@ -199,7 +200,14 @@ class ImageView(QScrollArea):
             event.accept()
             return True
 
-        if self._scrolling_behavior == SCROLL_PAN or delta == 0:
+        if (
+            self._scrolling_behavior == SCROLL_PAN
+            or (
+                self._scrolling_behavior == SCROLL_NAVIGATE_WHEN_FITTED
+                and not self._fit_to_window
+            )
+            or delta == 0
+        ):
             return False
         if self._scrolling_behavior == SCROLL_NAVIGATE_AT_END:
             scrollbar = (

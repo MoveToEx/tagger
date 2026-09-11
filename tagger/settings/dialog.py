@@ -59,6 +59,7 @@ from tagger.ui.preview.config import (
     MAX_IMAGE_PREFETCH_COUNT,
     SCROLL_NAVIGATE,
     SCROLL_NAVIGATE_AT_END,
+    SCROLL_NAVIGATE_WHEN_FITTED,
     SCROLL_PAN,
     SCROLL_ZOOM,
 )
@@ -232,6 +233,10 @@ class SettingsDialog(QDialog):
         self.scrolling_behavior_input = QComboBox()
         self.scrolling_behavior_input.addItem("Navigate", SCROLL_NAVIGATE)
         self.scrolling_behavior_input.addItem("Pan", SCROLL_PAN)
+        self.scrolling_behavior_input.addItem(
+            "Pan, Navigate when fitted to window",
+            SCROLL_NAVIGATE_WHEN_FITTED,
+        )
         self.scrolling_behavior_input.addItem(
             "Pan, Navigate at end", SCROLL_NAVIGATE_AT_END
         )
