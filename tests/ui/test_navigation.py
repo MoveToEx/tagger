@@ -6,7 +6,11 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QAction, QGuiApplication, QWheelEvent
 from PySide6.QtWidgets import QMenu, QProxyStyle, QStyle, QToolBar, QToolButton
 
-from tagger.settings.preferences import SCROLLING_BEHAVIOR_SETTING
+from tagger.settings.preferences import (
+    CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
+    CATALOG_NAVIGATE,
+    SCROLLING_BEHAVIOR_SETTING,
+)
 from tagger.settings.store import JsonSettings
 from tagger.ui.main_window.window import MainWindow
 import tagger.ui.main_window.window as main_window_module
@@ -152,6 +156,36 @@ def test_mouse_wheel_navigate_setting_changes_images_and_menu_item_is_removed(
     QGuiApplication.sendEvent(window.image_view.viewport(), wheel)
 
     assert window.image_list.currentIndex().row() == 1
+
+
+def test_catalog_navigate_click_hold_behavior_selects_without_dragging(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    create_png(tmp_path / "a.png")
+    create_png(tmp_path / "b.png")
+    settings = JsonSettings(tmp_path / "settings.json")
+    settings.setValue(CATALOG_CLICK_HOLD_BEHAVIOR_SETTING, CATALOG_NAVIGATE)
+    monkeypatch.setattr(main_window_module, "create_app_settings", lambda: settings)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    window.show()
+    qtbot.waitExposed(window)
+
+    assert not window.image_list.dragEnabled()
+    assert window.image_list.click_hold_behavior == CATALOG_NAVIGATE
+    assert (
+        window.image_list.dragDropMode()
+        == window.image_list.DragDropMode.DropOnly
+    )
+
+    target = window.catalog.index_for_row(1)
+    qtbot.mouseClick(
+        window.image_list.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=window.image_list.visualRect(target).center(),
+    )
+    assert window.image_list.currentIndex() == target
 
 
 def test_zoom_scroll_behavior_zooms_instead_of_navigating(

@@ -190,6 +190,9 @@ class DialogController:
         dialog.scrolling_behavior_changed.connect(
             self.window.image_view.set_scrolling_behavior
         )
+        dialog.catalog_click_hold_behavior_changed.connect(
+            self.window.image_list.set_click_hold_behavior
+        )
         dialog.exec()
 
     def _open_ai_tagging(

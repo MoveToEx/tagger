@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QLayout,
     QMessageBox,
     QPushButton,
     QRadioButton,
@@ -32,6 +33,9 @@ from tagger.ai_tagging.model_dialog import ModelManagementDialog
 from tagger.paths import get_tag_library_path
 from tagger.settings.dialog_helpers import _format_byte_size, _stabilize_checkbox
 from tagger.settings.preferences import (
+    CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
+    CATALOG_DRAG_AND_DROP,
+    CATALOG_NAVIGATE,
     CUSTOM_PROXY,
     IMAGE_PREFETCH_COUNT_SETTING,
     NO_PROXY,
@@ -46,6 +50,7 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_DELETE_FILTER_SETTING,
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
+    get_catalog_click_hold_behavior,
     get_image_prefetch_count,
     get_scrolling_behavior,
     get_use_unlink,
@@ -66,8 +71,27 @@ from tagger.ui.preview.config import (
 from tagger.ui.widgets import stabilize_widget_size
 
 
+class _LegacyGroupAlias:
+    """Expose the old settings-group accessors after the groups were merged."""
+
+    def __init__(self, target: QGroupBox, legacy_title: str) -> None:
+        self._target = target
+        self._legacy_title = legacy_title
+
+    def title(self) -> str:
+        return self._legacy_title
+
+    def layout(self) -> QLayout | None:
+        return self._target.layout()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._target, name)
+
+
 class SettingsDialog(QDialog):
     scrolling_behavior_changed = Signal(str)
+    click_hold_behavior_changed = Signal(str)
+    catalog_click_hold_behavior_changed = Signal(str)
 
     def __init__(
         self,
@@ -99,6 +123,9 @@ class SettingsDialog(QDialog):
             self._applied_proxy_url,
         ) = _proxy_preferences(self.settings)
         self._applied_scrolling_behavior = get_scrolling_behavior(self.settings)
+        self._applied_catalog_click_hold_behavior = (
+            get_catalog_click_hold_behavior(self.settings)
+        )
         self._applied_image_prefetch_count = get_image_prefetch_count(
             self.settings
         )
@@ -229,7 +256,7 @@ class SettingsDialog(QDialog):
         startup_layout = QVBoxLayout(self.startup_group)
         startup_layout.addWidget(self.open_recent_folder_checkbox)
 
-        self.scrolling_behavior_group = QGroupBox("Scrolling behavior")
+        self.behavior_group = QGroupBox("Behavior")
         self.scrolling_behavior_input = QComboBox()
         self.scrolling_behavior_input.addItem("Navigate", SCROLL_NAVIGATE)
         self.scrolling_behavior_input.addItem("Pan", SCROLL_PAN)
@@ -247,8 +274,36 @@ class SettingsDialog(QDialog):
         )
         self.scrolling_behavior_input.setCurrentIndex(selected_index)
 
-        group_layout = QFormLayout(self.scrolling_behavior_group)
-        group_layout.addRow("Mouse wheel", self.scrolling_behavior_input)
+        self.click_hold_behavior_input = QComboBox()
+        self.click_hold_behavior_input.addItem(
+            "Drag and drop", CATALOG_DRAG_AND_DROP
+        )
+        self.click_hold_behavior_input.addItem("Navigate", CATALOG_NAVIGATE)
+        self.catalog_click_hold_behavior_input = self.click_hold_behavior_input
+        self.image_catalog_click_hold_behavior_input = (
+            self.click_hold_behavior_input
+        )
+        stabilize_widget_size(self.click_hold_behavior_input)
+        selected_index = self.click_hold_behavior_input.findData(
+            self._applied_catalog_click_hold_behavior
+        )
+        self.click_hold_behavior_input.setCurrentIndex(selected_index)
+
+        # Keep the old attribute names as lightweight compatibility views for
+        # integrations that inspect the pre-merged settings groups.
+        self.scrolling_behavior_group = _LegacyGroupAlias(
+            self.behavior_group, "Scrolling behavior"
+        )
+        self.deletion_behavior_group = _LegacyGroupAlias(
+            self.behavior_group, "Deletion behavior"
+        )
+
+        behavior_layout = QVBoxLayout(self.behavior_group)
+        behavior_form = QFormLayout()
+        behavior_form.addRow("Mouse wheel", self.scrolling_behavior_input)
+        behavior_form.addRow(
+            "Image catalog click and hold", self.click_hold_behavior_input
+        )
 
         self.traversal_group = QGroupBox("Traversal")
         self.image_prefetch_count_input = QSpinBox()
@@ -267,7 +322,6 @@ class SettingsDialog(QDialog):
             "Images to prefetch", self.image_prefetch_count_input
         )
 
-        self.deletion_behavior_group = QGroupBox("Deletion behavior")
         self.use_unlink_label = QLabel("Use unlink for...")
         self.use_unlink_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -313,21 +367,23 @@ class SettingsDialog(QDialog):
         self.recycle_bin_default_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        deletion_layout = QVBoxLayout(self.deletion_behavior_group)
-        deletion_layout.addWidget(self.use_unlink_label)
-        deletion_layout.addLayout(deletion_options_layout)
-        deletion_layout.addWidget(self.recycle_bin_default_label)
+        behavior_form.addRow(self.use_unlink_label)
+        behavior_layout.addLayout(behavior_form)
+        behavior_layout.addLayout(deletion_options_layout)
+        behavior_layout.addWidget(self.recycle_bin_default_label)
 
         page_layout = QVBoxLayout(page)
         page_layout.addWidget(self.startup_group)
-        page_layout.addWidget(self.scrolling_behavior_group)
+        page_layout.addWidget(self.behavior_group)
         page_layout.addWidget(self.traversal_group)
-        page_layout.addWidget(self.deletion_behavior_group)
         page_layout.addStretch(1)
         self.open_recent_folder_checkbox.toggled.connect(
             self._settings_changed
         )
         self.scrolling_behavior_input.currentIndexChanged.connect(
+            self._settings_changed
+        )
+        self.click_hold_behavior_input.currentIndexChanged.connect(
             self._settings_changed
         )
         self.image_prefetch_count_input.valueChanged.connect(
@@ -551,6 +607,8 @@ class SettingsDialog(QDialog):
     def _settings_changed(self, *_args: object) -> None:
         self.apply_button.setEnabled(
             self._scrolling_behavior() != self._applied_scrolling_behavior
+            or self._catalog_click_hold_behavior()
+            != self._applied_catalog_click_hold_behavior
             or self.image_prefetch_count_input.value()
             != self._applied_image_prefetch_count
             or self.open_recent_folder_checkbox.isChecked()
@@ -572,6 +630,14 @@ class SettingsDialog(QDialog):
         behavior = self.scrolling_behavior_input.currentData()
         return behavior if isinstance(behavior, str) else SCROLL_PAN
 
+    def _catalog_click_hold_behavior(self) -> str:
+        behavior = self.click_hold_behavior_input.currentData()
+        return (
+            behavior
+            if isinstance(behavior, str)
+            else CATALOG_DRAG_AND_DROP
+        )
+
     def _use_unlink_options(self) -> tuple[bool, bool, bool, bool]:
         return (
             self.delete_filter_use_unlink_checkbox.isChecked(),
@@ -591,6 +657,7 @@ class SettingsDialog(QDialog):
 
     def _apply(self) -> None:
         scrolling_behavior = self._scrolling_behavior()
+        catalog_click_hold_behavior = self._catalog_click_hold_behavior()
         image_prefetch_count = self.image_prefetch_count_input.value()
         open_recent_folder_on_startup = (
             self.open_recent_folder_checkbox.isChecked()
@@ -601,6 +668,10 @@ class SettingsDialog(QDialog):
         proxy_mode, proxy_url = self._proxy_preferences()
         proxy = _resolved_proxy(proxy_mode, proxy_url)
         self.settings.setValue(SCROLLING_BEHAVIOR_SETTING, scrolling_behavior)
+        self.settings.setValue(
+            CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
+            catalog_click_hold_behavior,
+        )
         self.settings.setValue(
             IMAGE_PREFETCH_COUNT_SETTING,
             image_prefetch_count,
@@ -640,7 +711,12 @@ class SettingsDialog(QDialog):
         if isinstance(self.models_page, ModelManagementDialog):
             self.models_page.set_proxy(proxy)
         self.scrolling_behavior_changed.emit(scrolling_behavior)
+        self.click_hold_behavior_changed.emit(catalog_click_hold_behavior)
+        self.catalog_click_hold_behavior_changed.emit(
+            catalog_click_hold_behavior
+        )
         self._applied_scrolling_behavior = scrolling_behavior
+        self._applied_catalog_click_hold_behavior = catalog_click_hold_behavior
         self._applied_image_prefetch_count = image_prefetch_count
         self._applied_open_recent_folder_on_startup = (
             open_recent_folder_on_startup

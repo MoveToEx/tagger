@@ -28,6 +28,10 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QTreeView
 
 from tagger.domain.models import ImageEntry
+from tagger.settings.preferences import (
+    CATALOG_CLICK_HOLD_BEHAVIORS,
+    CATALOG_DRAG_AND_DROP,
+)
 from tagger.ui.drag_wheel import forward_native_drag_wheel
 
 
@@ -321,6 +325,7 @@ class ImageCatalogView(QTreeView):
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDropIndicatorShown(True)
         self.setAutoScroll(False)
+        self._click_hold_behavior = CATALOG_DRAG_AND_DROP
         self._catalog_drag_active = False
         self._native_drag_running = False
         self._pending_move: tuple[ImageEntry, Path] | None = None
@@ -332,6 +337,23 @@ class ImageCatalogView(QTreeView):
         application = QApplication.instance()
         if application is not None:
             application.installEventFilter(self._drag_wheel_filter)
+
+    @property
+    def click_hold_behavior(self) -> str:
+        return self._click_hold_behavior
+
+    def set_click_hold_behavior(self, behavior: str) -> None:
+        if behavior not in CATALOG_CLICK_HOLD_BEHAVIORS:
+            behavior = CATALOG_DRAG_AND_DROP
+        self._click_hold_behavior = behavior
+        self.setDragDropMode(
+            QAbstractItemView.DragDropMode.DragDrop
+            if behavior == CATALOG_DRAG_AND_DROP
+            else QAbstractItemView.DragDropMode.DropOnly
+        )
+
+    def set_catalog_click_hold_behavior(self, behavior: str) -> None:
+        self.set_click_hold_behavior(behavior)
 
     def _catalog_model(self) -> ImageCatalogModel | None:
         model = self.model()
@@ -395,6 +417,8 @@ class ImageCatalogView(QTreeView):
 
     @override
     def startDrag(self, supported_actions: Qt.DropAction) -> None:
+        if self._click_hold_behavior != CATALOG_DRAG_AND_DROP:
+            return
         self._catalog_drag_active = True
         self._native_drag_running = True
         self._pending_move = None
@@ -438,7 +462,10 @@ class ImageCatalogView(QTreeView):
     @override
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         super().dragEnterEvent(event)
-        if self._dragged_entry(event) is None:
+        if (
+            self._click_hold_behavior != CATALOG_DRAG_AND_DROP
+            or self._dragged_entry(event) is None
+        ):
             self._finish_drag_tracking()
             event.ignore()
             return
@@ -450,6 +477,8 @@ class ImageCatalogView(QTreeView):
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         super().dragMoveEvent(event)
         entry = self._dragged_entry(event)
+        if self._click_hold_behavior != CATALOG_DRAG_AND_DROP:
+            entry = None
         self._update_edge_scroll(
             event.position().toPoint() if entry is not None else None
         )
@@ -471,7 +500,8 @@ class ImageCatalogView(QTreeView):
         destination = self._destination_at(event.position().toPoint())
         self._finish_drag_tracking()
         if (
-            entry is None
+            self._click_hold_behavior != CATALOG_DRAG_AND_DROP
+            or entry is None
             or destination is None
             or self._same_directory(entry.image_path.parent, destination)
         ):

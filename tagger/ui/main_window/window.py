@@ -29,6 +29,7 @@ from tagger.domain.tags import tag_matches_pattern
 from tagger.settings.preferences import (
     PARENTHESES_SETTING,
     UNDERSCORES_SETTING,
+    get_catalog_click_hold_behavior,
     get_scrolling_behavior,
 )
 from tagger.settings.store import create_app_settings
@@ -545,6 +546,9 @@ class MainWindow(QMainWindow):
         self.image_view.set_fit_to_window(fit)
         self.image_view.set_scrolling_behavior(
             get_scrolling_behavior(self.settings)
+        )
+        self.image_list.set_click_hold_behavior(
+            get_catalog_click_hold_behavior(self.settings)
         )
 
     @override

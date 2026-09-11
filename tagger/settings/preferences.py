@@ -13,6 +13,7 @@ from tagger.ui.preview.config import (
 UNDERSCORES_SETTING = "autocomplete/transform_underscores_to_spaces"
 PARENTHESES_SETTING = "autocomplete/escape_parentheses"
 SCROLLING_BEHAVIOR_SETTING = "general/scrolling_behavior"
+CATALOG_CLICK_HOLD_BEHAVIOR_SETTING = "general/catalog_click_hold_behavior"
 IMAGE_PREFETCH_COUNT_SETTING = "general/traversal_image_prefetch_count"
 OPEN_RECENT_FOLDER_ON_STARTUP_SETTING = (
     "general/open_recent_folder_on_startup"
@@ -28,12 +29,32 @@ SYSTEM_PROXY = "system"
 CUSTOM_PROXY = "custom"
 PROXY_MODES = {NO_PROXY, SYSTEM_PROXY, CUSTOM_PROXY}
 
+CATALOG_DRAG_AND_DROP = "drag_and_drop"
+CATALOG_NAVIGATE = "navigate"
+CATALOG_CLICK_HOLD_BEHAVIORS = {
+    CATALOG_DRAG_AND_DROP,
+    CATALOG_NAVIGATE,
+}
+DEFAULT_CATALOG_CLICK_HOLD_BEHAVIOR = CATALOG_DRAG_AND_DROP
+
 
 def get_scrolling_behavior(settings: JsonSettings) -> str:
     behavior = settings.value(SCROLLING_BEHAVIOR_SETTING, None, type=str)
     if isinstance(behavior, str) and behavior in SCROLLING_BEHAVIORS:
         return behavior
     return SCROLL_PAN
+
+
+def get_catalog_click_hold_behavior(settings: JsonSettings) -> str:
+    behavior = settings.value(
+        CATALOG_CLICK_HOLD_BEHAVIOR_SETTING, None, type=str
+    )
+    if (
+        isinstance(behavior, str)
+        and behavior in CATALOG_CLICK_HOLD_BEHAVIORS
+    ):
+        return behavior
+    return DEFAULT_CATALOG_CLICK_HOLD_BEHAVIOR
 
 
 def get_image_prefetch_count(settings: JsonSettings) -> int:

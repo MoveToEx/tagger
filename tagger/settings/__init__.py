@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from tagger.settings.preferences import (
     CUSTOM_PROXY as CUSTOM_PROXY,
+    CATALOG_CLICK_HOLD_BEHAVIOR_SETTING as CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
+    CATALOG_CLICK_HOLD_BEHAVIORS as CATALOG_CLICK_HOLD_BEHAVIORS,
+    CATALOG_DRAG_AND_DROP as CATALOG_DRAG_AND_DROP,
+    CATALOG_NAVIGATE as CATALOG_NAVIGATE,
+    DEFAULT_CATALOG_CLICK_HOLD_BEHAVIOR as DEFAULT_CATALOG_CLICK_HOLD_BEHAVIOR,
     IMAGE_PREFETCH_COUNT_SETTING as IMAGE_PREFETCH_COUNT_SETTING,
     NO_PROXY as NO_PROXY,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING as OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
@@ -17,6 +22,7 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING as USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING as USE_UNLINK_FOR_TIDY_SETTING,
     get_deletion_behavior as get_deletion_behavior,
+    get_catalog_click_hold_behavior as get_catalog_click_hold_behavior,
     get_image_prefetch_count as get_image_prefetch_count,
     get_scrolling_behavior as get_scrolling_behavior,
     get_use_unlink as get_use_unlink,

@@ -85,7 +85,11 @@ to the system Recycle Bin, keeping undecided images. Cancel discards the choices
 without deleting files.
 
 To permanently delete duplicates instead, enable _Deduplicate_ under
-_Settings_ > _General_ > _Deletion behavior_ > _Use unlink for..._.
+_Settings_ > _General_ > _Behavior_ > _Use unlink for..._.
+
+The catalog click-and-hold behavior can also be set under _Settings_ >
+_General_ > _Behavior_: choose _Drag and drop_ to move images between folders,
+or _Navigate_ to change the selected image without moving files.
 
 #### AI tagging
 

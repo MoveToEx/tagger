@@ -8,6 +8,9 @@ from PySide6.QtWidgets import QMessageBox, QTreeWidget
 from tagger.ai_tagging.model_dialog import ModelManagementDialog
 from tagger.settings.dialog import SettingsDialog
 from tagger.settings.preferences import (
+    CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
+    CATALOG_DRAG_AND_DROP,
+    CATALOG_NAVIGATE,
     IMAGE_PREFETCH_COUNT_SETTING,
     OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
     PARENTHESES_SETTING,
@@ -20,6 +23,7 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
     get_deletion_behavior,
+    get_catalog_click_hold_behavior,
     get_image_prefetch_count,
     get_scrolling_behavior,
     get_use_unlink,
@@ -118,6 +122,39 @@ def test_general_settings_stages_scrolling_behavior(qtbot, tmp_path: Path) -> No
     assert get_scrolling_behavior(settings) == SCROLL_NAVIGATE
     assert get_scrolling_behavior(JsonSettings(settings_path)) == SCROLL_NAVIGATE
     assert applied == [SCROLL_NAVIGATE]
+
+
+def test_general_settings_stages_catalog_click_hold_behavior(
+    qtbot, tmp_path: Path
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = JsonSettings(settings_path)
+    settings.setValue(CATALOG_CLICK_HOLD_BEHAVIOR_SETTING, CATALOG_NAVIGATE)
+    settings.sync()
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    assert dialog.behavior_group.title() == "Behavior"
+    assert [
+        dialog.click_hold_behavior_input.itemText(index)
+        for index in range(dialog.click_hold_behavior_input.count())
+    ] == ["Drag and drop", "Navigate"]
+    assert dialog.click_hold_behavior_input.currentData() == CATALOG_NAVIGATE
+
+    dialog.click_hold_behavior_input.setCurrentIndex(
+        dialog.click_hold_behavior_input.findData(CATALOG_DRAG_AND_DROP)
+    )
+    assert dialog.apply_button.isEnabled()
+    assert get_catalog_click_hold_behavior(settings) == CATALOG_NAVIGATE
+
+    dialog.apply_button.click()
+
+    assert not dialog.apply_button.isEnabled()
+    assert get_catalog_click_hold_behavior(settings) == CATALOG_DRAG_AND_DROP
+    assert (
+        get_catalog_click_hold_behavior(JsonSettings(settings_path))
+        == CATALOG_DRAG_AND_DROP
+    )
 
 
 def test_scrolling_behavior_accepts_navigate_when_fitted(
