@@ -28,6 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QTreeView
 
 from tagger.domain.models import ImageEntry
+from tagger.ui.drag_wheel import forward_native_drag_wheel
 
 
 class ImageCatalogModel(QStandardItemModel):
@@ -401,7 +402,8 @@ class ImageCatalogView(QTreeView):
         self._native_drag_running = True
         self._pending_move = None
         try:
-            super().startDrag(supported_actions)
+            with forward_native_drag_wheel(self.viewport()):
+                super().startDrag(supported_actions)
         finally:
             self._native_drag_running = False
             self._finish_drag_tracking()
