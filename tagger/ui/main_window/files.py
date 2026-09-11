@@ -184,7 +184,8 @@ class FileActions:
         menu.exec(self.window.image_list.viewport().mapToGlobal(position))
 
     def _create_image_context_menu(self) -> QMenu:
-        has_entry = self.window._current_entry() is not None and self.window.directory is not None
+        current = self.window._current_entry()
+        has_entry = current is not None and self.window.directory is not None
         edit_action = QAction("Edit", self.window)
         edit_action.setEnabled(has_entry)
         edit_action.triggered.connect(self._edit_current_image)
@@ -207,6 +208,25 @@ class FileActions:
         menu.addSeparator()
         menu.addAction(edit_action)
         menu.addAction(reveal_action)
+        menu.addSeparator()
+        send_to_menu = QMenu("Send to", menu)
+        menu.addMenu(send_to_menu)
+        ai_tagging_action = send_to_menu.addAction("AI Tagging...")
+        ai_tagging_action.setEnabled(
+            current is not None
+            and current.editable
+            and self.window.commands.ai_tagging_action.isEnabled()
+        )
+        ai_tagging_action.setToolTip(
+            self.window.commands.ai_tagging_action.toolTip()
+        )
+        if current is not None:
+            image_path = current.image_path
+            ai_tagging_action.triggered.connect(
+                lambda _checked=False: self.window.dialogs._open_ai_tagging(
+                    initial_image_path=image_path
+                )
+            )
         return menu
 
     def _edit_current_image(self) -> None:

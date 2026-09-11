@@ -192,13 +192,19 @@ class DialogController:
         )
         dialog.exec()
 
-    def _open_ai_tagging(self) -> None:
+    def _open_ai_tagging(
+        self, *, initial_image_path: Path | None = None
+    ) -> None:
         if not ai_dependencies_available() or self.window.directory is None:
             return
         editable_entries = [
             entry for entry in self.window.catalog.entries if entry.editable
         ]
         if not editable_entries:
+            return
+        if initial_image_path is not None and all(
+            entry.image_path != initial_image_path for entry in editable_entries
+        ):
             return
         current = self.window._current_entry()
         dialog = AITaggingDialog(
@@ -207,6 +213,7 @@ class DialogController:
             root_directory=self.window.directory,
             proxy=get_download_proxy(self.window.settings),
             image_prefetch_count=get_image_prefetch_count(self.window.settings),
+            initial_image_path=initial_image_path,
         )
         if dialog.exec() == AITaggingDialog.DialogCode.Accepted:
             self.window.folders._load_directory(

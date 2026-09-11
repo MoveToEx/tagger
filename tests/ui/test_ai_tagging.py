@@ -267,6 +267,31 @@ def test_ai_tagger_disables_absent_models_in_selector(
     assert not empty_dialog.start_button.isEnabled()
 
 
+def test_ai_tagger_can_check_only_an_initial_image(
+    qtbot, tmp_path: Path
+) -> None:
+    entries: list[ImageEntry] = []
+    for name in ("first.png", "second.png"):
+        image_path = tmp_path / name
+        entries.append(
+            ImageEntry(
+                image_path,
+                image_path.with_suffix(".txt"),
+                source_bytes=b"",
+            )
+        )
+
+    dialog = AITaggingDialog(
+        entries,
+        root_directory=tmp_path,
+        initial_image_path=entries[1].image_path,
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog._checked_entries() == [entries[1]]
+    assert dialog.selection_label.text() == "1 image(s) selected."
+
+
 def test_ai_tagger_apply_all_ignores_tag_decisions(
     qtbot, tmp_path: Path
 ) -> None:

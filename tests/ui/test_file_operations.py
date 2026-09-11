@@ -11,10 +11,12 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
 )
+from tagger.ai_tagging.dialog import AITaggingDialog
 from tagger.storage import ArchiveResult
 from tagger.trash import SYSTEM_RECYCLE_BIN, UNLINK
 import tagger.trash as trash_module
 import tagger.ui.dialogs.archive as archive_module
+import tagger.ui.main_window.dialogs as window_dialogs
 import tagger.ui.main_window.files as window_files
 from tagger.ui.main_window.window import MainWindow
 
@@ -275,8 +277,11 @@ def test_image_context_menu_renames_selected_image_and_tag(
         "",
         "Edit",
         "Reveal in Explorer",
+        "",
+        "Send to",
     ]
     assert menu.actions()[3].isSeparator()
+    assert menu.actions()[6].isSeparator()
     menu.actions()[0].trigger()
 
     assert not image_path.exists()
@@ -289,6 +294,44 @@ def test_image_context_menu_renames_selected_image_and_tag(
     assert "Renamed pair to renamed.png and renamed.txt" in (
         window.statusBar().currentMessage()
     )
+
+
+def test_image_context_menu_sends_only_selected_image_to_ai_tagging(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    for name in ("first.png", "second.png"):
+        create_png(tmp_path / name)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    window._select_row(1)
+    selected = window._current_entry()
+    assert selected is not None
+    window.commands.ai_tagging_action.setEnabled(True)
+    monkeypatch.setattr(
+        window_dialogs, "ai_dependencies_available", lambda: True
+    )
+    opened: list[list[Path]] = []
+
+    def inspect_dialog(dialog: AITaggingDialog):
+        qtbot.addWidget(dialog)
+        opened.append(
+            [entry.image_path for entry in dialog._checked_entries()]
+        )
+        return AITaggingDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(AITaggingDialog, "exec", inspect_dialog)
+
+    menu = window.files._create_image_context_menu()
+    send_to = menu.actions()[-1].menu()
+    assert isinstance(send_to, QMenu)
+    assert send_to.title() == "Send to"
+    assert [action.text() for action in send_to.actions()] == [
+        "AI Tagging..."
+    ]
+    send_to.actions()[0].trigger()
+
+    assert opened == [[selected.image_path]]
 
 
 def test_image_context_menu_duplicates_selected_image_and_tag(

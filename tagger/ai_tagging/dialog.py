@@ -62,11 +62,13 @@ class AITaggingDialog(QDialog):
         root_directory: Path | None = None,
         proxy: str | None = None,
         image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
+        initial_image_path: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._entries = [entry for entry in entries if entry.editable]
         self._root_directory = root_directory or self._common_root_directory()
         self._proxy = proxy.strip() if proxy is not None else None
+        self._initial_image_path = initial_image_path
         self._updating_checks = False
         self._selected_entries: list[ImageEntry] = []
         self._results: dict[str, list[tuple[str, float]]] = {}
@@ -257,11 +259,14 @@ class AITaggingDialog(QDialog):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setData(0, Qt.ItemDataRole.UserRole + 1, entry)
             item.setToolTip(0, str(entry.image_path))
+            checked = (
+                entry.image_path == self._initial_image_path
+                if self._initial_image_path is not None
+                else not entry.tags
+            )
             item.setCheckState(
                 0,
-                Qt.CheckState.Checked
-                if not entry.tags
-                else Qt.CheckState.Unchecked,
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked,
             )
             folder_items[relative_parent].addChild(item)
         self._refresh_folder_check_states(root_item)
