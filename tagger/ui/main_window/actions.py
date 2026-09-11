@@ -43,6 +43,24 @@ class WindowActions:
         self.close_folder_action.setShortcut(QKeySequence.StandardKey.Close)
         self.close_folder_action.triggered.connect(self.window.folders.close_folder)
 
+        self.rename_action = QAction("Rename...", self.window)
+        self.rename_action.setToolTip("Rename image and tag")
+        self.rename_action.triggered.connect(
+            self.window.files._rename_current_image_and_tag
+        )
+
+        self.duplicate_action = QAction("Duplicate", self.window)
+        self.duplicate_action.setToolTip("Duplicate image and tag")
+        self.duplicate_action.triggered.connect(
+            self.window.files._duplicate_current_image_and_tag
+        )
+
+        self.delete_action = QAction("Delete", self.window)
+        self.delete_action.setToolTip("Delete image and tag")
+        self.delete_action.triggered.connect(
+            self.window.files._delete_current_image_and_tag
+        )
+
         self.rescan_action = QAction("Rescan", self.window)
         self.rescan_action.setShortcut(QKeySequence("F5"))
         self.rescan_action.triggered.connect(self.window.folders.rescan)
@@ -158,6 +176,9 @@ class WindowActions:
         toolbar_icons = {
             self.open_action: "open.svg",
             self.close_folder_action: "close.svg",
+            self.rename_action: "rename.svg",
+            self.duplicate_action: "duplicate.svg",
+            self.delete_action: "delete.svg",
             self.previous_action: "previous.svg",
             self.next_action: "next.svg",
             self.zoom_in_action: "zoom-in.svg",
@@ -225,6 +246,10 @@ class WindowActions:
         toolbar.addAction(self.open_action)
         toolbar.addAction(self.close_folder_action)
         toolbar.addSeparator()
+        toolbar.addAction(self.rename_action)
+        toolbar.addAction(self.duplicate_action)
+        toolbar.addAction(self.delete_action)
+        toolbar.addSeparator()
         toolbar.addAction(self.previous_action)
         toolbar.addAction(self.next_action)
         toolbar.addSeparator()
@@ -251,6 +276,12 @@ class WindowActions:
 
         has_directory = self.window.directory is not None
         self.close_folder_action.setEnabled(has_directory)
+        for action in [
+            self.rename_action,
+            self.duplicate_action,
+            self.delete_action,
+        ]:
+            action.setEnabled(has_current and has_directory)
         self.rescan_action.setEnabled(has_directory)
         self.tidy_action.setEnabled(has_directory)
         self.archive_action.setEnabled(
