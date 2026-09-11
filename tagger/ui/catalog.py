@@ -232,12 +232,9 @@ class ImageCatalogModel(QStandardItemModel):
             if parent.isValid()
             else self.root_directory
         )
-        return (
-            entry is not None
-            and destination is not None
-            and str(entry.image_path.parent.absolute()).casefold()
-            != str(destination.absolute()).casefold()
-        )
+        # Qt also uses this check to update the drag hover indicator. Keep
+        # same-folder targets active; the view rejects no-op moves on drop.
+        return entry is not None and destination is not None
 
     def group_for_row(self, row: int) -> str | None:
         if 0 <= row < len(self.groups):
@@ -457,11 +454,7 @@ class ImageCatalogView(QTreeView):
             event.position().toPoint() if entry is not None else None
         )
         destination = self._destination_at(event.position().toPoint())
-        if (
-            entry is None
-            or destination is None
-            or self._same_directory(entry.image_path.parent, destination)
-        ):
+        if entry is None or destination is None:
             event.ignore()
             return
         event.setDropAction(Qt.DropAction.MoveAction)

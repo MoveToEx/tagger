@@ -10,7 +10,14 @@ from PySide6.QtGui import (
     QDropEvent,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QMenu
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QMenu,
+    QStyle,
+    QStyledItemDelegate,
+)
+import pytest
 
 from tagger.settings.preferences import OPEN_RECENT_FOLDER_ON_STARTUP_SETTING
 from tagger.settings.store import JsonSettings
@@ -458,6 +465,86 @@ def test_image_catalog_scrolls_with_wheel_during_drag(
     assert down_value > start_value
     assert up_event.isAccepted()
     assert scroll_bar.value() == start_value
+
+
+@pytest.mark.parametrize("folder_name", ["", "nested"])
+def test_image_catalog_drag_hover_follows_files_in_same_folder(
+    qtbot, tmp_path: Path, folder_name: str
+) -> None:
+    directory = tmp_path / folder_name
+    directory.mkdir(exist_ok=True)
+    image_paths = [directory / f"image-{index}.png" for index in range(3)]
+    for path in image_paths:
+        create_png(path)
+        path.with_suffix(".txt").write_bytes(b"cat\n")
+    other = tmp_path / "other"
+    other.mkdir()
+    create_png(other / "target.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.folders._load_directory(tmp_path, show_issues=False)
+    view = window.image_list
+    model = window.catalog
+    indexes = []
+    for path in image_paths:
+        row = model.row_for_image(path)
+        assert row is not None
+        indexes.append(model.index_for_row(row))
+    view.setCurrentIndex(indexes[0])
+    moves = []
+    view.image_move_requested.connect(lambda *args: moves.append(args))
+    hovered = set()
+
+    class HoverDelegate(QStyledItemDelegate):
+        def paint(self, painter, option, index) -> None:
+            if option.state & QStyle.StateFlag.State_MouseOver:
+                hovered.add(QModelIndex(index))
+            else:
+                hovered.discard(index)
+            super().paint(painter, option, index)
+
+    view.setItemDelegate(HoverDelegate(view))
+    mime_data = model.mimeData([indexes[0]])
+    position = view.visualRect(indexes[0]).center()
+    enter = QDragEnterEvent(
+        position, Qt.DropAction.MoveAction, mime_data,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(view.viewport(), enter)
+    assert enter.isAccepted()
+
+    other_row = model.row_for_image(other / "target.png")
+    assert other_row is not None
+    targets = [model.index_for_row(other_row), *indexes[1:], indexes[0]]
+    if folder_name:
+        targets.append(indexes[0].parent())
+    for target in targets:
+        position = view.visualRect(target).center()
+        move = QDragMoveEvent(
+            position, Qt.DropAction.MoveAction, mime_data,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(view.viewport(), move)
+        assert move.isAccepted()
+        qtbot.waitUntil(lambda: hovered == {target})
+        assert view.currentIndex() == indexes[0]
+        assert view.selectionModel().selectedIndexes() == [indexes[0]]
+
+    drop = QDropEvent(
+        QPointF(position), Qt.DropAction.MoveAction, mime_data,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(view.viewport(), drop)
+    QApplication.processEvents()
+
+    assert not drop.isAccepted()
+    assert moves == []
+    assert view.state() == QAbstractItemView.State.NoState
+    assert not view._edge_scroll_timer.isActive()
+    for path in image_paths:
+        assert path.is_file()
+        assert path.with_suffix(".txt").read_bytes() == b"cat\n"
 
 
 def test_image_catalog_scrolls_with_mouse_wheel(qtbot, tmp_path: Path) -> None:
