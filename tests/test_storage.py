@@ -11,6 +11,7 @@ from tagger.domain.models import ImageEntry
 from tagger.storage import (
     archive_entries,
     BatchPreflightError,
+    copy_dropped_images,
     duplicate_image_pair,
     ExternalChangeError,
     WriteRequest,
@@ -104,6 +105,116 @@ def test_scan_keeps_images_from_each_folder_contiguous(tmp_path: Path) -> None:
         entry.image_path.relative_to(tmp_path).as_posix()
         for entry in result.entries
     ] == ["a.jpg", "z.jpg", "nested/b.jpg"]
+
+
+def test_copy_dropped_images_copies_sidecars_and_creates_missing_ones(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    first_image = source / "first.JPG"
+    second_image = source / "second.png"
+    first_sidecar = source / "first.txt"
+    touch_image(first_image)
+    touch_image(second_image)
+    first_sidecar.write_bytes(b"cat\n")
+
+    imported = copy_dropped_images(
+        [first_image, first_sidecar, second_image],
+        destination,
+        IMAGE_EXTENSIONS,
+    )
+
+    assert imported == [
+        (destination / "first.JPG", destination / "first.txt"),
+        (destination / "second.png", destination / "second.txt"),
+    ]
+    assert (destination / "first.JPG").read_bytes() == first_image.read_bytes()
+    assert (destination / "first.txt").read_bytes() == b"cat\n"
+    assert (destination / "second.png").read_bytes() == second_image.read_bytes()
+    assert (destination / "second.txt").read_bytes() == b"\n"
+    assert first_image.exists()
+    assert first_sidecar.exists()
+    assert second_image.exists()
+
+
+def test_copy_dropped_images_preserves_full_name_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    image_path = source / "sample.jpg"
+    sidecar_path = source / "sample.jpg.txt"
+    touch_image(image_path)
+    sidecar_path.write_bytes(b"dog\n")
+
+    imported = copy_dropped_images(
+        [image_path, sidecar_path], destination, IMAGE_EXTENSIONS
+    )
+
+    assert imported == [
+        (destination / "sample.jpg", destination / "sample.jpg.txt")
+    ]
+    assert (destination / "sample.jpg.txt").read_bytes() == b"dog\n"
+    assert not (destination / "sample.txt").exists()
+
+
+def test_copy_dropped_images_preflights_all_destination_collisions(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    first_image = source / "first.jpg"
+    second_image = source / "second.png"
+    touch_image(first_image)
+    touch_image(second_image)
+    (destination / "SECOND.PNG").write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError, match="second.png"):
+        copy_dropped_images(
+            [first_image, second_image], destination, IMAGE_EXTENSIONS
+        )
+
+    assert not (destination / "first.jpg").exists()
+    assert not (destination / "first.txt").exists()
+    assert (destination / "SECOND.PNG").read_bytes() == b"existing"
+
+
+def test_copy_dropped_images_rolls_back_failed_batch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    first_image = source / "first.jpg"
+    second_image = source / "second.png"
+    touch_image(first_image)
+    touch_image(second_image)
+    original_copyfileobj = shutil.copyfileobj
+    calls = 0
+
+    def fail_second_copy(source_stream, destination_stream) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise PermissionError("source is locked")
+        original_copyfileobj(source_stream, destination_stream)
+
+    monkeypatch.setattr(shutil, "copyfileobj", fail_second_copy)
+
+    with pytest.raises(OSError, match="Could not import second.png"):
+        copy_dropped_images(
+            [first_image, second_image], destination, IMAGE_EXTENSIONS
+        )
+
+    assert list(destination.iterdir()) == []
+    assert first_image.exists()
+    assert second_image.exists()
 
 
 def test_scan_prefers_stem_then_falls_back_to_full_name(tmp_path: Path) -> None:

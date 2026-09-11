@@ -747,3 +747,127 @@ def test_dropped_folder_replaces_open_folder(qtbot, tmp_path: Path) -> None:
     assert window.catalog.entries[0].image_path == second_folder / "second.png"
     assert window.tag_input.text() == ""
     assert window.search_input.text() == ""
+
+
+def test_dropped_images_are_copied_to_open_folder_root(qtbot, tmp_path: Path) -> None:
+    destination = tmp_path / "destination"
+    nested = destination / "nested"
+    source = tmp_path / "source"
+    nested.mkdir(parents=True)
+    source.mkdir()
+    create_png(nested / "existing.png")
+    first_image = source / "first.png"
+    second_image = source / "second.png"
+    first_sidecar = source / "first.txt"
+    create_png(first_image)
+    create_png(second_image)
+    first_sidecar.write_text("cat\n", encoding="utf-8")
+    mime_data = QMimeData()
+    mime_data.setUrls(
+        [
+            QUrl.fromLocalFile(str(first_image)),
+            QUrl.fromLocalFile(str(first_sidecar)),
+            QUrl.fromLocalFile(str(second_image)),
+        ]
+    )
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(destination, show_issues=False)
+
+    drag_event = QDragEnterEvent(
+        QPoint(20, 20),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.dragEnterEvent(drag_event)
+    drop_event = QDropEvent(
+        QPointF(20, 20),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.dropEvent(drop_event)
+
+    assert drag_event.isAccepted()
+    assert drop_event.isAccepted()
+    assert drop_event.dropAction() == Qt.DropAction.CopyAction
+    assert (destination / "first.png").exists()
+    assert (destination / "first.txt").read_text(encoding="utf-8") == "cat\n"
+    assert (destination / "second.png").exists()
+    assert (destination / "second.txt").read_text(encoding="utf-8") == "\n"
+    assert first_image.exists()
+    assert first_sidecar.exists()
+    assert second_image.exists()
+    current = window._current_entry()
+    assert current is not None
+    assert current.image_path == destination / "first.png"
+    assert "Imported 2 images into the root folder." in (
+        window.statusBar().currentMessage()
+    )
+
+
+def test_dropped_images_require_an_open_folder(qtbot, tmp_path: Path) -> None:
+    image_path = tmp_path / "sample.png"
+    create_png(image_path)
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(image_path))])
+    window = MainWindow()
+    qtbot.addWidget(window)
+    drag_event = QDragEnterEvent(
+        QPoint(20, 20),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    window.dragEnterEvent(drag_event)
+
+    assert not drag_event.isAccepted()
+
+
+def test_image_drop_over_catalog_is_handled_by_main_window(
+    qtbot, tmp_path: Path
+) -> None:
+    destination = tmp_path / "destination"
+    source = tmp_path / "source"
+    destination.mkdir()
+    source.mkdir()
+    create_png(destination / "existing.png")
+    image_path = source / "imported.png"
+    create_png(image_path)
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(image_path))])
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(destination, show_issues=False)
+    window.show()
+    qtbot.waitExposed(window)
+    viewport = window.image_list.viewport()
+    position = viewport.rect().center()
+    drag_event = QDragEnterEvent(
+        position,
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    QApplication.sendEvent(viewport, drag_event)
+
+    assert drag_event.isAccepted()
+    drop_event = QDropEvent(
+        QPointF(position),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(viewport, drop_event)
+
+    assert drop_event.isAccepted()
+    assert (destination / "imported.png").exists()
+    assert (destination / "imported.txt").read_text(encoding="utf-8") == "\n"

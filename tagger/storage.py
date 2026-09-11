@@ -381,6 +381,118 @@ def _copy_file_exclusive(source: Path, destination: Path) -> None:
         raise
 
 
+def copy_dropped_images(
+    sources: Sequence[Path],
+    destination_directory: Path,
+    supported_extensions: Iterable[str],
+) -> list[tuple[Path, Path]]:
+    """Copy dropped images and their explicitly dropped sidecars."""
+    destination_directory = Path(destination_directory)
+    if not destination_directory.is_dir():
+        raise NotADirectoryError(
+            f"Destination folder does not exist: {destination_directory}"
+        )
+
+    extensions = {
+        extension.casefold()
+        if extension.startswith(".")
+        else f".{extension.casefold()}"
+        for extension in supported_extensions
+    }
+    dropped: list[Path] = []
+    seen_sources: set[str] = set()
+    for item in sources:
+        source = Path(item)
+        key = _path_key(source)
+        if key not in seen_sources:
+            dropped.append(source)
+            seen_sources.add(key)
+
+    for source in dropped:
+        if not source.is_file():
+            raise FileNotFoundError(f"File does not exist: {source}")
+
+    images = [
+        source for source in dropped if source.suffix.casefold() in extensions
+    ]
+    if not images:
+        raise ValueError("No supported image files were dropped.")
+
+    sidecars = {
+        _path_key(source): source
+        for source in dropped
+        if source.suffix.casefold() == ".txt"
+    }
+    copy_plan: list[tuple[Path | None, Path]] = []
+    imported: list[tuple[Path, Path]] = []
+    for image_path in images:
+        new_image_path = destination_directory / image_path.name
+        copy_plan.append((image_path, new_image_path))
+
+        stem_sidecar = image_path.with_suffix(".txt")
+        full_sidecar = image_path.with_name(f"{image_path.name}.txt")
+        dropped_sidecars = [
+            sidecar
+            for candidate in (stem_sidecar, full_sidecar)
+            if (sidecar := sidecars.get(_path_key(candidate))) is not None
+        ]
+        if dropped_sidecars:
+            for sidecar in dropped_sidecars:
+                copy_plan.append(
+                    (sidecar, destination_directory / sidecar.name)
+                )
+            new_tag_path = destination_directory / dropped_sidecars[0].name
+        else:
+            new_tag_path = destination_directory / stem_sidecar.name
+            copy_plan.append((None, new_tag_path))
+        imported.append((new_image_path, new_tag_path))
+
+    destinations_by_name: dict[str, Path] = {}
+    for _source, destination in copy_plan:
+        key = destination.name.casefold()
+        previous = destinations_by_name.get(key)
+        if previous is not None:
+            raise FileExistsError(
+                f"Multiple dropped files would be copied as {destination.name}."
+            )
+        destinations_by_name[key] = destination
+
+    existing_names = {
+        child.name.casefold(): child for child in destination_directory.iterdir()
+    }
+    for destination_name, destination in destinations_by_name.items():
+        if destination_name in existing_names:
+            raise FileExistsError(
+                f"A file named {destination.name} already exists in "
+                f"{destination_directory}."
+            )
+
+    created: list[Path] = []
+    try:
+        for source, destination in copy_plan:
+            if source is None:
+                with destination.open(
+                    "x", encoding="utf-8", newline="\n"
+                ) as stream:
+                    stream.write("\n")
+            else:
+                _copy_file_exclusive(source, destination)
+            created.append(destination)
+    except OSError as exc:
+        cleanup_errors: list[str] = []
+        for path in reversed(created):
+            try:
+                path.unlink()
+            except OSError as cleanup_exc:
+                cleanup_errors.append(f"{path.name}: {cleanup_exc}")
+        message = f"Could not import {destination.name}: {exc}"
+        if cleanup_errors:
+            message += ". Could not remove: " + "; ".join(cleanup_errors)
+        raise OSError(message) from exc
+
+    return imported
+
+
 def duplicate_image_pair(entry: ImageEntry) -> tuple[Path, Path]:
     """Copy an image and its sidecar using a fixed ``_2`` suffix."""
     image_path = Path(entry.image_path)

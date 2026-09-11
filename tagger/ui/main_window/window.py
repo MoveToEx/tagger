@@ -188,19 +188,44 @@ class MainWindow(QMainWindow):
         self.folders._open_recent_folder_on_startup()
         self.commands._update_action_states()
 
-    def _dropped_directory(self, event) -> Path | None:
+    def _dropped_local_paths(self, event) -> list[Path] | None:
         if not event.mimeData().hasUrls():
             return None
         urls = event.mimeData().urls()
-        if len(urls) != 1 or not urls[0].isLocalFile():
+        if not urls or any(not url.isLocalFile() for url in urls):
             return None
-        path = Path(urls[0].toLocalFile())
-        return path if path.is_dir() else None
+        return [Path(url.toLocalFile()) for url in urls]
+
+    def _dropped_directory(self, event) -> Path | None:
+        paths = self._dropped_local_paths(event)
+        if paths is None or len(paths) != 1:
+            return None
+        return paths[0] if paths[0].is_dir() else None
+
+    def _dropped_image_files(self, event) -> list[Path] | None:
+        if self.directory is None:
+            return None
+        paths = self._dropped_local_paths(event)
+        if paths is None or any(not path.is_file() for path in paths):
+            return None
+        extensions = self.folders._supported_extensions()
+        if not any(path.suffix.casefold() in extensions for path in paths):
+            return None
+        if any(
+            path.suffix.casefold() not in extensions
+            and path.suffix.casefold() != ".txt"
+            for path in paths
+        ):
+            return None
+        return paths
 
     @override
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if self._dropped_directory(event) is not None:
             event.acceptProposedAction()
+        elif self._dropped_image_files(event) is not None:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
         else:
             event.ignore()
 
@@ -208,18 +233,28 @@ class MainWindow(QMainWindow):
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if self._dropped_directory(event) is not None:
             event.acceptProposedAction()
+        elif self._dropped_image_files(event) is not None:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
         else:
             event.ignore()
 
     @override
     def dropEvent(self, event: QDropEvent) -> None:
         directory = self._dropped_directory(event)
-        if directory is None:
+        if directory is not None:
+            event.acceptProposedAction()
+            self.folders.close_folder()
+            self.folders._load_directory(directory, show_issues=True)
+            return
+
+        sources = self._dropped_image_files(event)
+        if sources is None:
             event.ignore()
             return
-        event.acceptProposedAction()
-        self.folders.close_folder()
-        self.folders._load_directory(directory, show_issues=True)
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        self.folders.import_images(sources)
 
     def _select_row(self, row: int) -> None:
         if self.catalog.entry(row) is None:

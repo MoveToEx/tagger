@@ -8,7 +8,7 @@ from PySide6.QtGui import QImageReader
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from tagger.settings.preferences import OPEN_RECENT_FOLDER_ON_STARTUP_SETTING
-from tagger.storage import scan_folder
+from tagger.storage import copy_dropped_images, scan_folder
 
 
 if TYPE_CHECKING:
@@ -127,6 +127,32 @@ class FolderController:
             self.window.directory,
             preferred_image=current.image_path if current else None,
             show_issues=True,
+        )
+
+    def import_images(self, sources: list[Path]) -> None:
+        directory = self.window.directory
+        if directory is None:
+            return
+        try:
+            imported = copy_dropped_images(
+                sources, directory, self._supported_extensions()
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(
+                self.window, "Could Not Import Images", str(exc)
+            )
+            return
+
+        self._load_directory(
+            directory,
+            preferred_image=imported[0][0],
+            show_issues=True,
+        )
+        count = len(imported)
+        self.window.statusBar().showMessage(
+            f"Imported {count} image{'s' if count != 1 else ''} into the root "
+            "folder.",
+            4000,
         )
 
     def _load_directory(
