@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSplitter,
-    QTreeView,
     QVBoxLayout,
     QWidget,
 )
@@ -35,7 +34,7 @@ from tagger.settings.preferences import (
 from tagger.settings.store import create_app_settings
 from tagger.tag_library.completion import attach_tag_completer
 from tagger.tag_library.library import TagLibrary
-from tagger.ui.catalog import ImageCatalogModel
+from tagger.ui.catalog import ImageCatalogModel, ImageCatalogView
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
 
@@ -80,9 +79,11 @@ class MainWindow(QMainWindow):
         )
 
         self.catalog = ImageCatalogModel(self)
-        self.image_list = QTreeView()
+        self.image_list = ImageCatalogView()
         self.image_list.setModel(self.catalog)
-        self.image_list.setSelectionMode(QTreeView.SelectionMode.SingleSelection)
+        self.image_list.setSelectionMode(
+            ImageCatalogView.SelectionMode.SingleSelection
+        )
         self.image_list.setMinimumWidth(220)
         self.image_list.setHeaderHidden(True)
         self.image_list.setUniformRowHeights(True)
@@ -92,6 +93,9 @@ class MainWindow(QMainWindow):
         )
         self.image_list.customContextMenuRequested.connect(
             self.files._show_image_context_menu
+        )
+        self.image_list.image_move_requested.connect(
+            self.files._move_image_to_folder
         )
         self.image_list.installEventFilter(self)
         self.image_list.selectionModel().currentChanged.connect(

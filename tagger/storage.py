@@ -294,6 +294,73 @@ def rename_image_pair(
     return new_image_path, new_tag_path
 
 
+def move_image_pair(
+    entry: ImageEntry, destination_directory: Path
+) -> tuple[Path, Path]:
+    """Move an image and its sidecar into an existing directory."""
+    image_path = Path(entry.image_path)
+    tag_path = Path(entry.tag_path)
+    destination_directory = Path(destination_directory)
+    new_image_path = destination_directory / image_path.name
+    new_tag_path = destination_directory / tag_path.name
+
+    if (
+        image_path.parent == destination_directory
+        and tag_path.parent == destination_directory
+    ):
+        return image_path, tag_path
+    if not destination_directory.is_dir():
+        raise NotADirectoryError(
+            f"Destination folder does not exist: {destination_directory}"
+        )
+    for source in (image_path, tag_path):
+        if not source.is_file():
+            raise FileNotFoundError(f"File does not exist: {source}")
+
+    if (
+        new_image_path.name.casefold() == new_tag_path.name.casefold()
+        and image_path != tag_path
+    ):
+        raise FileExistsError(
+            f"Both files would be named {new_image_path.name}."
+        )
+    for source, destination in (
+        (image_path, new_image_path),
+        (tag_path, new_tag_path),
+    ):
+        for sibling in destination_directory.iterdir():
+            if (
+                sibling.name.casefold() == destination.name.casefold()
+                and sibling != source
+            ):
+                raise FileExistsError(
+                    f"A file named {destination.name} already exists in "
+                    f"{destination_directory}."
+                )
+
+    try:
+        image_path.rename(new_image_path)
+    except OSError as exc:
+        raise OSError(
+            f"Could not move {image_path.name} to {destination_directory}: {exc}"
+        ) from exc
+
+    try:
+        tag_path.rename(new_tag_path)
+    except OSError as exc:
+        try:
+            new_image_path.rename(image_path)
+        except OSError as rollback_exc:
+            raise OSError(
+                f"Could not move {tag_path.name}: {exc}. The image was left "
+                f"in {destination_directory} because rollback failed: "
+                f"{rollback_exc}"
+            ) from exc
+        raise OSError(f"Could not move {tag_path.name}: {exc}") from exc
+
+    return new_image_path, new_tag_path
+
+
 def _copy_file_exclusive(source: Path, destination: Path) -> None:
     created = False
     try:

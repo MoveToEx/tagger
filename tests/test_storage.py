@@ -15,6 +15,7 @@ from tagger.storage import (
     ExternalChangeError,
     WriteRequest,
     find_unrecognized_files,
+    move_image_pair,
     rename_image_pair,
     scan_folder,
     write_tags_atomic,
@@ -220,6 +221,81 @@ def test_rename_image_pair_rolls_back_when_sidecar_rename_fails(
     assert tag_path.exists()
     assert not (tmp_path / "new.png").exists()
     assert not (tmp_path / "new.txt").exists()
+
+
+def test_move_image_pair_moves_both_files_without_renaming(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    image_path = source / "sample.PNG"
+    tag_path = source / "sample.PNG.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+
+    new_image_path, new_tag_path = move_image_pair(
+        ImageEntry(image_path, tag_path), destination
+    )
+
+    assert new_image_path == destination / "sample.PNG"
+    assert new_tag_path == destination / "sample.PNG.txt"
+    assert new_image_path.read_bytes() == b"not decoded by scanner"
+    assert new_tag_path.read_bytes() == b"cat\n"
+    assert not image_path.exists()
+    assert not tag_path.exists()
+
+
+def test_move_image_pair_rejects_collision_without_changes(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    image_path = source / "sample.png"
+    tag_path = source / "sample.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+    (destination / "SAMPLE.PNG").write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError, match="sample.png"):
+        move_image_pair(ImageEntry(image_path, tag_path), destination)
+
+    assert image_path.exists()
+    assert tag_path.read_bytes() == b"cat\n"
+    assert (destination / "SAMPLE.PNG").read_bytes() == b"existing"
+    assert not (destination / "sample.txt").exists()
+
+
+def test_move_image_pair_rolls_back_when_sidecar_move_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    image_path = source / "sample.png"
+    tag_path = source / "sample.txt"
+    touch_image(image_path)
+    tag_path.write_bytes(b"cat\n")
+    original_rename = Path.rename
+
+    def fail_for_sidecar(path: Path, target: Path) -> Path:
+        if path == tag_path:
+            raise PermissionError("sidecar is locked")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_for_sidecar)
+
+    with pytest.raises(OSError, match="Could not move sample.txt"):
+        move_image_pair(ImageEntry(image_path, tag_path), destination)
+
+    assert image_path.exists()
+    assert tag_path.exists()
+    assert not (destination / "sample.png").exists()
+    assert not (destination / "sample.txt").exists()
 
 
 def test_duplicate_image_pair_copies_both_files_with_fixed_suffix(

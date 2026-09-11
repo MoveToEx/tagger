@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QModelIndex, QPoint, QPointF, QUrl, Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
-from PySide6.QtWidgets import QMenu
+from PySide6.QtGui import (
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QWheelEvent,
+)
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QMenu
 
 from tagger.settings.preferences import OPEN_RECENT_FOLDER_ON_STARTUP_SETTING
 from tagger.settings.store import JsonSettings
@@ -245,6 +251,296 @@ def test_image_list_groups_images_by_subfolder(qtbot, tmp_path: Path) -> None:
     assert current is not None
     assert current.image_path == deep / "grandchild.png"
     assert not window.commands.next_action.isEnabled()
+
+
+def test_image_catalog_drag_moves_image_and_sidecar_into_folder(
+    qtbot, tmp_path: Path
+) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    source_image = tmp_path / "source.png"
+    source_tag = tmp_path / "source.txt"
+    create_png(source_image)
+    source_tag.write_text("cat\n", encoding="utf-8")
+    create_png(nested / "existing.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.folders._load_directory(tmp_path, show_issues=False)
+
+    folder_index = window.catalog.index(0, 0)
+    source_row = window.catalog.row_for_image(source_image)
+    assert source_row is not None
+    source_index = window.catalog.index_for_row(source_row)
+    assert source_index.flags() & Qt.ItemFlag.ItemIsDragEnabled
+    assert folder_index.flags() & Qt.ItemFlag.ItemIsDropEnabled
+    assert (
+        window.image_list.dragDropMode()
+        == QAbstractItemView.DragDropMode.DragDrop
+    )
+
+    mime_data = window.catalog.mimeData([source_index])
+    position = window.image_list.visualRect(folder_index).center()
+    drag_event = QDragEnterEvent(
+        position,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dragEnterEvent(drag_event)
+    assert drag_event.isAccepted()
+    move_event = QDragMoveEvent(
+        position,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dragMoveEvent(move_event)
+    assert move_event.isAccepted()
+    drop_event = QDropEvent(
+        QPointF(position),
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dropEvent(drop_event)
+
+    moved_image = nested / "source.png"
+    moved_tag = nested / "source.txt"
+    assert drop_event.isAccepted()
+    qtbot.waitUntil(moved_image.exists)
+    assert not source_image.exists()
+    assert not source_tag.exists()
+    assert moved_image.exists()
+    assert moved_tag.read_text(encoding="utf-8") == "cat\n"
+    current = window._current_entry()
+    assert current is not None
+    assert current.image_path == moved_image
+    moved_row = window.catalog.row_for_image(moved_image)
+    assert moved_row is not None
+    assert window.catalog.destination_for_index(
+        window.catalog.index_for_row(moved_row)
+    ) == nested
+    assert window.image_list.state() == QAbstractItemView.State.NoState
+    assert "Moved source.png and source.txt to nested." in (
+        window.statusBar().currentMessage()
+    )
+
+
+def test_image_catalog_drop_onto_image_moves_pair_to_its_folder(
+    qtbot, tmp_path: Path
+) -> None:
+    origin = tmp_path / "origin"
+    nested = tmp_path / "nested"
+    origin.mkdir()
+    nested.mkdir()
+    source_image = origin / "source.png"
+    source_tag = origin / "source.txt"
+    create_png(source_image)
+    source_tag.write_text("cat\n", encoding="utf-8")
+    target_image = nested / "target.png"
+    create_png(target_image)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.folders._load_directory(tmp_path, show_issues=False)
+
+    source_row = window.catalog.row_for_image(source_image)
+    target_row = window.catalog.row_for_image(target_image)
+    assert source_row is not None
+    assert target_row is not None
+    mime_data = window.catalog.mimeData(
+        [window.catalog.index_for_row(source_row)]
+    )
+    target_index = window.catalog.index_for_row(target_row)
+    position = window.image_list.visualRect(target_index).center()
+    drag_event = QDragEnterEvent(
+        position,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dragEnterEvent(drag_event)
+    move_event = QDragMoveEvent(
+        position,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    window.image_list.dragMoveEvent(move_event)
+    drop_event = QDropEvent(
+        QPointF(position),
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dropEvent(drop_event)
+
+    moved_image = nested / "source.png"
+    assert drag_event.isAccepted()
+    assert move_event.isAccepted()
+    assert drop_event.isAccepted()
+    qtbot.waitUntil(moved_image.exists)
+    assert not source_image.exists()
+    assert not source_tag.exists()
+    assert moved_image.exists()
+    assert (nested / "source.txt").read_text(encoding="utf-8") == "cat\n"
+    assert window.catalog.rowCount() == 1
+    destination_folder = window.catalog.index(0, 0)
+    assert window.catalog.data(destination_folder) == "nested"
+    assert window.catalog.rowCount(destination_folder) == 2
+    assert window.catalog.row_for_image(source_image) is None
+    moved_row = window.catalog.row_for_image(moved_image)
+    assert moved_row is not None
+    assert window.catalog.index_for_row(moved_row).parent() == destination_folder
+
+
+def test_image_catalog_scrolls_with_wheel_during_drag(
+    qtbot, tmp_path: Path
+) -> None:
+    for index in range(50):
+        create_png(tmp_path / f"image-{index:02d}.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.resize(600, 320)
+    window.show()
+    window.folders._load_directory(tmp_path, show_issues=False)
+    scroll_bar = window.image_list.verticalScrollBar()
+    assert scroll_bar.maximum() > 0
+    scroll_bar.setValue(scroll_bar.maximum() // 2)
+    start_value = scroll_bar.value()
+
+    source_index = window.catalog.index_for_row(0)
+    mime_data = window.catalog.mimeData([source_index])
+    position = window.image_list.viewport().rect().center()
+    drag_event = QDragEnterEvent(
+        position,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dragEnterEvent(drag_event)
+    wheel_event = QWheelEvent(
+        QPointF(position),
+        QPointF(window.image_list.viewport().mapToGlobal(position)),
+        QPoint(),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+
+    QApplication.sendEvent(window, wheel_event)
+    down_value = scroll_bar.value()
+    up_event = QWheelEvent(
+        QPointF(position),
+        QPointF(window.image_list.viewport().mapToGlobal(position)),
+        QPoint(),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(window, up_event)
+    window.image_list.dragLeaveEvent(QDragLeaveEvent())
+
+    assert wheel_event.isAccepted()
+    assert down_value > start_value
+    assert up_event.isAccepted()
+    assert scroll_bar.value() == start_value
+
+
+def test_image_catalog_scrolls_with_mouse_wheel(qtbot, tmp_path: Path) -> None:
+    for index in range(50):
+        create_png(tmp_path / f"image-{index:02d}.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.resize(600, 320)
+    window.show()
+    window.folders._load_directory(tmp_path, show_issues=False)
+    viewport = window.image_list.viewport()
+    scroll_bar = window.image_list.verticalScrollBar()
+    assert scroll_bar.maximum() > 0
+    assert scroll_bar.value() == 0
+    position = viewport.rect().center()
+    wheel_event = QWheelEvent(
+        QPointF(position),
+        QPointF(viewport.mapToGlobal(position)),
+        QPoint(),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+
+    QApplication.sendEvent(viewport, wheel_event)
+
+    assert wheel_event.isAccepted()
+    assert scroll_bar.value() > 0
+
+
+def test_image_catalog_scrolls_while_dragging_near_edges(
+    qtbot, tmp_path: Path
+) -> None:
+    for index in range(50):
+        create_png(tmp_path / f"image-{index:02d}.png")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.resize(600, 320)
+    window.show()
+    window.folders._load_directory(tmp_path, show_issues=False)
+    scroll_bar = window.image_list.verticalScrollBar()
+    assert scroll_bar.maximum() > 0
+
+    source_index = window.catalog.index_for_row(0)
+    mime_data = window.catalog.mimeData([source_index])
+    bottom = QPoint(
+        window.image_list.viewport().width() // 2,
+        window.image_list.viewport().height() - 2,
+    )
+    drag_event = QDragEnterEvent(
+        bottom,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dragEnterEvent(drag_event)
+    move_event = QDragMoveEvent(
+        bottom,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dragMoveEvent(move_event)
+    qtbot.waitUntil(lambda: scroll_bar.value() > 0)
+
+    scroll_bar.setValue(scroll_bar.maximum())
+    top = QPoint(window.image_list.viewport().width() // 2, 2)
+    move_event = QDragMoveEvent(
+        top,
+        Qt.DropAction.MoveAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    window.image_list.dragMoveEvent(move_event)
+    qtbot.waitUntil(lambda: scroll_bar.value() < scroll_bar.maximum())
+    window.image_list.dragLeaveEvent(QDragLeaveEvent())
+
+    assert not window.image_list._edge_scroll_timer.isActive()
 
 
 def test_close_folder_empties_program_state(qtbot, tmp_path: Path) -> None:

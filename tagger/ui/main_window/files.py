@@ -8,6 +8,7 @@ from PySide6.QtCore import QItemSelectionModel, QProcess
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMenu, QMessageBox
 
+from tagger.domain.models import ImageEntry
 from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
@@ -16,6 +17,7 @@ from tagger.settings.preferences import (
 from tagger.storage import (
     duplicate_image_pair,
     find_unrecognized_files,
+    move_image_pair,
     rename_image_pair,
 )
 from tagger.trash import UNLINK, delete_file
@@ -349,6 +351,59 @@ class FileActions:
         )
         self.window.statusBar().showMessage(
             f"Duplicated pair as {new_image_path.name} and {new_tag_path.name}.",
+            4000,
+        )
+
+    def _move_image_to_folder(
+        self, entry: ImageEntry, destination_directory: Path
+    ) -> None:
+        directory = self.window.directory
+        if directory is None:
+            return
+        try:
+            destination_directory.relative_to(directory)
+        except ValueError:
+            return
+
+        expected_image_path = destination_directory / entry.image_path.name
+        self.window.preview_loader.clear()
+        self.window.preview_loader.wait_for_done()
+        try:
+            new_image_path, new_tag_path = move_image_pair(
+                entry, destination_directory
+            )
+        except OSError as exc:
+            preferred_image = (
+                expected_image_path
+                if expected_image_path.is_file()
+                else entry.image_path
+            )
+            self.window.folders._load_directory(
+                directory,
+                preferred_image=preferred_image,
+                show_issues=False,
+            )
+            QMessageBox.critical(
+                self.window,
+                "Could Not Move Image and Tag",
+                str(exc),
+            )
+            return
+
+        self.window.folders._load_directory(
+            directory,
+            preferred_image=new_image_path,
+            show_issues=False,
+        )
+        relative_destination = destination_directory.relative_to(directory)
+        destination_label = (
+            "the root folder"
+            if relative_destination == Path(".")
+            else relative_destination.as_posix()
+        )
+        self.window.statusBar().showMessage(
+            f"Moved {new_image_path.name} and {new_tag_path.name} to "
+            f"{destination_label}.",
             4000,
         )
 
