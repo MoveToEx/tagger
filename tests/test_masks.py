@@ -12,6 +12,31 @@ from tagger.mask_storage import load_mask_image, render_masks, save_masks
 RECTANGLE = ((1.0, 1.0), (6.0, 1.0), (6.0, 6.0), (1.0, 6.0))
 
 
+def test_translation_preserves_shape_alpha_and_color() -> None:
+    mask = MaskRegion(((10, 20), (30, 10), (50, 40), (20, 30)), 0.35, "#123456")
+    moved = mask.translated(-5, 12)
+    assert moved.points == ((5, 32), (25, 22), (45, 52), (15, 42))
+    assert moved.alpha == mask.alpha
+    assert moved.color == mask.color
+    assert mask.points[0] == (10, 20)
+
+
+def test_polygon_resize_uses_tight_bounds_and_preserves_vertex_positions() -> None:
+    mask = MaskRegion(((10, 20), (30, 10), (50, 40), (20, 30)), 0.35, "#123456")
+    assert mask.bounds == (10, 10, 50, 40)
+    resized = mask.resized((5, 15, 85, 30))
+    assert resized.points == ((5, 20), (45, 15), (85, 30), (25, 25))
+    assert resized.alpha == mask.alpha
+    assert resized.color == mask.color
+    assert mask.bounds == (10, 10, 50, 40)
+
+
+@pytest.mark.parametrize("bounds", [(0, 0, 0, 10), (0, 5, 10, 4), (0, 0, float("inf"), 10)])
+def test_resize_rejects_collapsed_or_invalid_bounds(bounds) -> None:
+    with pytest.raises(ValueError, match="bounds"):
+        MaskRegion(RECTANGLE).resized(bounds)
+
+
 @pytest.mark.parametrize("alpha", [-0.1, 1.1, float("nan"), float("inf")])
 def test_invalid_alpha_is_rejected(alpha: float) -> None:
     with pytest.raises(ValueError, match="Alpha"):

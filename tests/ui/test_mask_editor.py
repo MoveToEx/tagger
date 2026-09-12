@@ -36,6 +36,253 @@ def _draw_rectangle(qtbot, dialog: MaskEditorDialog) -> None:
     qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
 
 
+def _mask_view_point(dialog: MaskEditorDialog, x: float, y: float) -> QPoint:
+    rect = dialog.image_view.image_rect()
+    return QPointF(rect.left() + x * rect.width() / 100, rect.top() + y * rect.height() / 80).toPoint()
+
+
+def test_pointer_selects_polygon_interiors_in_stack_order_and_clears_on_empty_space(qtbot, tmp_path) -> None:
+    dialog = MaskEditorDialog([_image(tmp_path / "a.png")])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog._add_mask(((10, 10), (90, 10), (90, 70), (10, 70)))
+    dialog._add_mask(((30, 20), (70, 20), (30, 60)))
+    dialog.save_button.click()
+    dialog.pointer_button.click()
+    assert dialog.pointer_button.isChecked()
+    assert not dialog.rectangle_button.isChecked()
+    assert not dialog.pointer_button.icon().isNull()
+    assert dialog.image_view.cursor().shape() == Qt.CursorShape.ArrowCursor
+    dialog.mask_list.setCurrentRow(1)
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=_mask_view_point(dialog, 40, 30))
+    assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == 0
+    # This point is inside the triangle's bounds but outside the triangle itself.
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=_mask_view_point(dialog, 60, 50))
+    assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == 1
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=QPoint(1, 1))
+    assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == -1
+    assert dialog.mask_list.model().moveRow(QModelIndex(), 1, QModelIndex(), 0)
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=_mask_view_point(dialog, 40, 30))
+    assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == 0
+    assert len(dialog.current_masks[0].points) == 4
+    assert dialog.mask_list.count() == 2
+
+
+@pytest.mark.parametrize("points", [
+    ((20, 15), (60, 15), (60, 50), (20, 50)),
+    ((20, 25), (40, 15), (60, 50), (30, 45)),
+])
+def test_move_tool_translates_without_resizing_and_saves_preview(qtbot, tmp_path, points) -> None:
+    path = _image(tmp_path / "a.png")
+    dialog = MaskEditorDialog([path])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.new_mask_alpha_input.setValue(0.5)
+    dialog._add_mask(points)
+    original = dialog.current_masks[0]
+    dialog.save_button.click()
+    dialog.mask_list.setCurrentRow(-1)
+    dialog.move_button.click()
+    assert not dialog.move_button.icon().isNull()
+    assert dialog.image_view.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    dialog.actual_opacity_button.click()
+    start = _mask_view_point(dialog, 40, 30)
+    end = _mask_view_point(dialog, 55, 40)
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == 0
+    assert dialog.image_view.cursor().shape() == Qt.CursorShape.ClosedHandCursor
+    qtbot.mouseMove(dialog.image_view, end)
+    assert dialog.current_masks[0] == original
+    assert not dialog.dirty_paths
+    preview = dialog.image_view._drag_preview
+    assert preview is not None
+    assert preview.bounds == pytest.approx((35, 25, 75, 60), abs=0.25)
+    qtbot.waitUntil(lambda: not dialog.image_view._alpha_pixmap.isNull())
+    assert dialog.image_view._alpha_pixmap.toImage().pixelColor(55, 40).alpha() == 128
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
+    moved = dialog.current_masks[0]
+    dx = moved.points[0][0] - original.points[0][0]
+    dy = moved.points[0][1] - original.points[0][1]
+    for (x, y), (old_x, old_y) in zip(moved.points, original.points):
+        assert (x - old_x, y - old_y) == pytest.approx((dx, dy))
+    assert moved.alpha == original.alpha
+    assert moved.color == original.color
+    assert dialog.image_view.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    dialog.save_button.click()
+    with Image.open(path) as result:
+        assert result.getchannel("A").getpixel((55, 40)) == 128
+        assert result.getchannel("A").getpixel((25, 25)) == 255
+
+
+def test_move_keeps_selected_mask_at_overlap_and_clamps_whole_shape(qtbot, tmp_path) -> None:
+    dialog = MaskEditorDialog([_image(tmp_path / "a.png")])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    points = ((20, 15), (60, 15), (60, 50), (20, 50))
+    dialog._add_mask(points)
+    dialog._add_mask(points)
+    top = dialog.current_masks[0]
+    dialog.mask_list.setCurrentRow(1)
+    dialog.move_button.click()
+    start = _mask_view_point(dialog, 40, 30)
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=QPoint(1, 1))
+    assert dialog.current_masks[0] == top
+    assert dialog.current_masks[1].bounds == (0, 0, 40, 35)
+    assert dialog.image_view.selected_mask == dialog.mask_list.currentRow() == 1
+    start = _mask_view_point(dialog, 10, 10)
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=dialog.image_view.rect().bottomRight())
+    assert dialog.current_masks[1].bounds == (59, 44, 99, 79)
+    assert dialog.current_masks[0] == top
+
+
+@pytest.mark.parametrize("cancel", ["escape", "tool", "navigate"])
+def test_move_can_be_cancelled_without_changing_mask(qtbot, tmp_path, cancel) -> None:
+    dialog = MaskEditorDialog([_image(tmp_path / name) for name in ("a.png", "b.png")])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog._add_mask(((20, 15), (60, 15), (60, 50), (20, 50)))
+    original = dialog.current_masks[0]
+    dialog.save_button.click()
+    dialog.move_button.click()
+    start, end = _mask_view_point(dialog, 40, 30), _mask_view_point(dialog, 55, 40)
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    assert not dialog.dirty_paths
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(dialog.image_view, end)
+    if cancel == "escape":
+        qtbot.keyClick(dialog.image_view, Qt.Key.Key_Escape)
+    elif cancel == "tool":
+        dialog.pointer_button.click()
+    else:
+        dialog.next_button.click()
+        dialog.previous_button.click()
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
+    assert dialog.current_masks[0] == original
+    assert not dialog.dirty_paths
+    assert dialog.image_view._drag_preview is None
+
+
+@pytest.mark.parametrize("start,end,bounds", [
+    ((20, 15), (10, 5), (10, 5, 60, 50)),
+    ((40, 15), (40, 5), (20, 5, 60, 50)),
+    ((60, 15), (80, 5), (20, 5, 80, 50)),
+    ((60, 32.5), (80, 32.5), (20, 15, 80, 50)),
+    ((60, 50), (80, 65), (20, 15, 80, 65)),
+    ((40, 50), (40, 65), (20, 15, 60, 65)),
+    ((20, 50), (10, 65), (10, 15, 60, 65)),
+    ((20, 32.5), (10, 32.5), (10, 15, 60, 50)),
+])
+def test_resize_polygon_from_each_bounding_box_handle(qtbot, tmp_path, start, end, bounds) -> None:
+    dialog = MaskEditorDialog([_image(tmp_path / "a.png")])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.new_mask_alpha_input.setValue(0.4)
+    dialog._add_mask(((20, 25), (40, 15), (60, 50), (30, 45)))
+    original = dialog.current_masks[0]
+    dialog.save_button.click()
+    assert dialog.image_view.selected_mask == 0
+    start_position = _mask_view_point(dialog, *start)
+    end_position = _mask_view_point(dialog, *end)
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start_position)
+    qtbot.mouseMove(dialog.image_view, end_position)
+    assert dialog.current_masks == [original]
+    assert not dialog.dirty_paths
+    assert dialog.image_view._drag_preview is not None
+    assert dialog.image_view._drag_preview.bounds == pytest.approx(bounds, abs=0.25)
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end_position)
+    resized = dialog.current_masks[0]
+    assert resized.bounds == pytest.approx(bounds, abs=0.25)
+    assert len(resized.points) == 4
+    assert resized.alpha == original.alpha
+    assert resized.color == original.color
+    assert dialog.dirty_paths == {dialog.current_path}
+    assert dialog.mask_list.count() == 1
+    assert dialog.image_view.selected_mask == 0
+
+
+def test_resize_rectangle_preview_and_saved_alpha_match(qtbot, tmp_path) -> None:
+    path = _image(tmp_path / "a.png")
+    dialog = MaskEditorDialog([path])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.new_mask_alpha_input.setValue(0.5)
+    dialog._add_mask(((20, 15), (60, 15), (60, 50), (20, 50)))
+    dialog.actual_opacity_button.click()
+    start = _mask_view_point(dialog, 60, 50)
+    end = _mask_view_point(dialog, 80, 65)
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(dialog.image_view, end)
+    qtbot.waitUntil(lambda: not dialog.image_view._alpha_pixmap.isNull())
+    assert dialog.image_view._alpha_pixmap.toImage().pixelColor(70, 55).alpha() == 128
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
+    dialog.save_button.click()
+    with Image.open(path) as result:
+        assert result.getchannel("A").getpixel((70, 55)) == 128
+        assert result.getchannel("A").getpixel((90, 70)) == 255
+
+
+def test_resize_cancels_and_clamps_without_inverting_the_mask(qtbot, tmp_path) -> None:
+    dialog = MaskEditorDialog([_image(tmp_path / "a.png")])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog._add_mask(((20, 15), (60, 15), (60, 50), (20, 50)))
+    original = dialog.current_masks[0]
+    dialog.save_button.click()
+    start = _mask_view_point(dialog, 20, 15)
+    end = _mask_view_point(dialog, 80, 65)
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(dialog.image_view, end)
+    assert dialog.image_view._drag_preview is not None
+    assert dialog.image_view._drag_preview.bounds == (59, 49, 60, 50)
+    qtbot.keyClick(dialog.image_view, Qt.Key.Key_Escape)
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
+    assert dialog.current_masks == [original]
+    assert not dialog.dirty_paths
+    assert dialog.isVisible()
+    # A click without dragging is also a no-op.
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    assert dialog.current_masks == [original]
+    assert not dialog.dirty_paths
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=QPoint(1, 1))
+    assert dialog.current_masks[0].bounds == (0, 0, 60, 50)
+    qtbot.keyClick(dialog.image_view, Qt.Key.Key_Escape)
+    assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == -1
+    assert dialog.image_view._resize_handles() == {}
+
+
+def test_resize_targets_selected_mask_after_reordering_and_navigation_cancels_drag(qtbot, tmp_path) -> None:
+    dialog = MaskEditorDialog([_image(tmp_path / name) for name in ("a.png", "b.png")])
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog._add_mask(((20, 15), (60, 15), (60, 50), (20, 50)))
+    dialog._add_mask(((5, 5), (10, 5), (10, 10), (5, 10)))
+    other = dialog.current_masks[0]
+    dialog.mask_list.setCurrentRow(1)
+    assert dialog.mask_list.model().moveRow(QModelIndex(), 1, QModelIndex(), 0)
+    assert dialog.image_view.selected_mask == dialog.mask_list.currentRow() == 0
+    start = _mask_view_point(dialog, 60, 50)
+    end = _mask_view_point(dialog, 80, 65)
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
+    assert dialog.current_masks[0].bounds == pytest.approx((20, 15, 80, 65), abs=0.25)
+    assert dialog.current_masks[1] == other
+    resized = dialog.current_masks[0]
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
+    qtbot.mouseMove(dialog.image_view, _mask_view_point(dialog, 70, 55))
+    dialog.next_button.click()
+    assert dialog.image_view._drag_preview is None
+    assert dialog.image_view.selected_mask == -1
+    dialog.previous_button.click()
+    assert dialog.current_masks[0] == resized
+    dialog.mask_list.setCurrentRow(0)
+    dialog.delete_button.click()
+    assert dialog.image_view.selected_mask == -1
+    assert dialog.image_view._resize_handles() == {}
+
+
 def test_picker_disables_jpeg_even_when_checking_parent_and_warns(qtbot, tmp_path, monkeypatch) -> None:
     png = _image(tmp_path / "a.png")
     jpeg = tmp_path / "b.JPEG"

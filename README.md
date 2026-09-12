@@ -105,6 +105,13 @@ Hover a mask in the list to highlight it at 85% opacity. Colored overlays use
 15% opacity; use the eye button to preview actual transparency. Base alpha sets
 the opacity of areas outside all masks and defaults to 1. Drag a mask's handle
 to reorder the list; masks at the top take priority over masks below them.
+Select a mask in the list to show its tight bounding rectangle. Drag a corner
+or edge to resize it; polygon vertices scale with the rectangle. Esc cancels
+an active resize, or clears the selection when no drawing or resize is active.
+The pointer tool selects the topmost mask under the cursor; clicking empty space
+clears the selection. The move tool drags a mask within the image boundaries,
+preserving its shape. Select a covered mask in the list to move it at overlaps.
+Esc cancels an active move.
 New mask alpha sets the initial alpha for subsequently drawn shapes and defaults
 to 0. It stays selected when navigating between images.
 

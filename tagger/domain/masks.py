@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 
 
@@ -23,3 +23,28 @@ class MaskRegion:
     @property
     def alpha_byte(self) -> int:
         return round(self.alpha * 255)
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        xs, ys = zip(*self.points)
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def resized(self, bounds: tuple[float, float, float, float]) -> MaskRegion:
+        """Scale vertices from the tight axis-aligned bounds into new bounds."""
+        left, top, right, bottom = bounds
+        old_left, old_top, old_right, old_bottom = self.bounds
+        if (not all(isfinite(value) for value in bounds)
+                or right <= left or bottom <= top
+                or old_right <= old_left or old_bottom <= old_top):
+            raise ValueError("Resize bounds must have positive width and height.")
+        return replace(self, points=tuple(
+            (
+                left + (x - old_left) * (right - left) / (old_right - old_left),
+                top + (y - old_top) * (bottom - top) / (old_bottom - old_top),
+            )
+            for x, y in self.points
+        ))
+
+    def translated(self, dx: float, dy: float) -> MaskRegion:
+        """Move all vertices equally, preserving the shape and mask attributes."""
+        return replace(self, points=tuple((x + dx, y + dy) for x, y in self.points))

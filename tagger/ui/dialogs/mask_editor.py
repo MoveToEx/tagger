@@ -64,6 +64,8 @@ class MaskSelectionDialog(TransparencySelectionDialog):
 
 class MaskImageView(QWidget):
     polygon_created = Signal(object)
+    mask_transformed = Signal(int, object)
+    mask_selected = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -77,6 +79,11 @@ class MaskImageView(QWidget):
         self.base_alpha = 1.0
         self.actual_opacity = False
         self.hovered_mask = -1
+        self.selected_mask = -1
+        self._drag_original: MaskRegion | None = None
+        self._drag_preview: MaskRegion | None = None
+        self._drag_handle = ""
+        self._drag_start = QPointF()
         self._image: Image.Image | None = None
         self._pixmap = QPixmap()
         self._alpha_pixmap = QPixmap()
@@ -92,12 +99,14 @@ class MaskImageView(QWidget):
 
     def set_image(self, image: Image.Image | None, masks: list[MaskRegion]) -> None:
         self.cancel_drawing()
+        self.selected_mask = -1
         self._image = image
         self._pixmap = ImageQt.toqpixmap(image) if image is not None else QPixmap()
         self.hovered_mask = -1
         self.set_masks(masks)
 
     def set_masks(self, masks: list[MaskRegion]) -> None:
+        self._cancel_drag()
         self.masks = masks
         self._alpha_pixmap = QPixmap()
         self.update()
@@ -105,6 +114,127 @@ class MaskImageView(QWidget):
     def set_tool(self, tool: str) -> None:
         self.cancel_drawing()
         self.tool = tool
+        self._set_resize_cursor("")
+
+    def set_selected_mask(self, index: int) -> None:
+        self.cancel_drawing()
+        self.selected_mask = index if 0 <= index < len(self.masks) else -1
+        self.update()
+
+    def _selected_region(self) -> MaskRegion | None:
+        if 0 <= self.selected_mask < len(self.masks):
+            return self._drag_preview or self.masks[self.selected_mask]
+        return None
+
+    def _selection_rect(self) -> QRectF:
+        mask = self._selected_region()
+        target = self.image_rect()
+        if mask is None or target.isEmpty():
+            return QRectF()
+        left, top, right, bottom = mask.bounds
+        scale = target.width() / self._pixmap.width()
+        return QRectF(
+            target.left() + left * scale, target.top() + top * scale,
+            (right - left) * scale, (bottom - top) * scale,
+        )
+
+    def _resize_handles(self) -> dict[str, QPointF]:
+        rect = self._selection_rect()
+        if rect.isEmpty() or self.tool == "move":
+            return {}
+        return {
+            "nw": rect.topLeft(), "n": QPointF(rect.center().x(), rect.top()),
+            "ne": rect.topRight(), "e": QPointF(rect.right(), rect.center().y()),
+            "se": rect.bottomRight(), "s": QPointF(rect.center().x(), rect.bottom()),
+            "sw": rect.bottomLeft(), "w": QPointF(rect.left(), rect.center().y()),
+        }
+
+    def _resize_hit_test(self, position: QPointF) -> str:
+        if self._points:
+            return ""
+        handles = self._resize_handles()
+        if not handles:
+            return ""
+        closest = min(handles, key=lambda name: (handles[name] - position).manhattanLength())
+        delta = handles[closest] - position
+        if abs(delta.x()) <= 6 and abs(delta.y()) <= 6:
+            return closest
+        rect = self._selection_rect()
+        if rect.top() <= position.y() <= rect.bottom():
+            if abs(position.x() - rect.left()) <= 5:
+                return "w"
+            if abs(position.x() - rect.right()) <= 5:
+                return "e"
+        if rect.left() <= position.x() <= rect.right():
+            if abs(position.y() - rect.top()) <= 5:
+                return "n"
+            if abs(position.y() - rect.bottom()) <= 5:
+                return "s"
+        return ""
+
+    def _mask_at(self, position: QPointF, *, prefer_selected: bool = False) -> int:
+        point = self._image_point(position)
+        if point is None:
+            return -1
+        indices = list(range(len(self.masks)))
+        if prefer_selected and self.selected_mask in indices:
+            indices.remove(self.selected_mask)
+            indices.insert(0, self.selected_mask)
+        for index in indices:
+            if self._polygon(self.masks[index]).containsPoint(point, Qt.FillRule.OddEvenFill):
+                return index
+        return -1
+
+    def _set_resize_cursor(self, handle: str) -> None:
+        cursors = {
+            "nw": Qt.CursorShape.SizeFDiagCursor, "se": Qt.CursorShape.SizeFDiagCursor,
+            "ne": Qt.CursorShape.SizeBDiagCursor, "sw": Qt.CursorShape.SizeBDiagCursor,
+            "n": Qt.CursorShape.SizeVerCursor, "s": Qt.CursorShape.SizeVerCursor,
+            "e": Qt.CursorShape.SizeHorCursor, "w": Qt.CursorShape.SizeHorCursor,
+        }
+        default = {
+            "pointer": Qt.CursorShape.ArrowCursor,
+            "move": Qt.CursorShape.OpenHandCursor,
+        }.get(self.tool, Qt.CursorShape.CrossCursor)
+        self.setCursor(cursors.get(handle, default))
+
+    def _update_drag(self, position: QPointF) -> None:
+        original = self._drag_original
+        target = self.image_rect()
+        if original is None or target.isEmpty():
+            return
+        left, top, right, bottom = original.bounds
+        delta = (position - self._drag_start) * self._pixmap.width() / target.width()
+        if self._drag_handle == "move":
+            dx = max(-left, min(self._pixmap.width() - 1.0 - right, delta.x()))
+            dy = max(-top, min(self._pixmap.height() - 1.0 - bottom, delta.y()))
+            self._drag_preview = original.translated(dx, dy)
+            self._alpha_pixmap = QPixmap()
+            self.update()
+            return
+        minimum_width = min(1.0, right - left)
+        minimum_height = min(1.0, bottom - top)
+        if "w" in self._drag_handle:
+            left = max(0.0, min(right - minimum_width, left + delta.x()))
+        if "e" in self._drag_handle:
+            right = min(self._pixmap.width() - 1.0, max(left + minimum_width, right + delta.x()))
+        if "n" in self._drag_handle:
+            top = max(0.0, min(bottom - minimum_height, top + delta.y()))
+        if "s" in self._drag_handle:
+            bottom = min(self._pixmap.height() - 1.0, max(top + minimum_height, bottom + delta.y()))
+        self._drag_preview = (
+            original if (left, top, right, bottom) == original.bounds
+            else original.resized((left, top, right, bottom))
+        )
+        self._alpha_pixmap = QPixmap()
+        self.update()
+
+    def _cancel_drag(self) -> None:
+        self._drag_original = None
+        self._drag_preview = None
+        self._drag_handle = ""
+        self._alpha_pixmap = QPixmap()
+        self._set_resize_cursor("")
 
     def set_actual_opacity(self, enabled: bool) -> None:
         self.actual_opacity = enabled
@@ -154,21 +284,25 @@ class MaskImageView(QWidget):
             painter.end()
             return
         painter.fillRect(target, self._checker)
+        masks = list(self.masks)
+        if self._drag_preview is not None and 0 <= self.selected_mask < len(masks):
+            masks[self.selected_mask] = self._drag_preview
         pixmap = self._pixmap
         if self.actual_opacity and self._image is not None:
             if self._alpha_pixmap.isNull():
                 self._alpha_pixmap = ImageQt.toqpixmap(
-                    render_masks(self._image, self.masks, self.base_alpha)
+                    render_masks(self._image, masks, self.base_alpha)
                 )
             pixmap = self._alpha_pixmap
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+        painter.save()
         painter.setClipRect(target)
         painter.translate(target.topLeft())
         painter.scale(target.width() / pixmap.width(), target.height() / pixmap.height())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        for index in reversed(range(len(self.masks))):
-            mask = self.masks[index]
+        for index in reversed(range(len(masks))):
+            mask = masks[index]
             color = QColor(mask.color)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
@@ -183,7 +317,7 @@ class MaskImageView(QWidget):
             painter.drawPolygon(self._polygon(mask))
         # Draw the hovered fill last so higher-priority masks cannot hide it.
         if 0 <= self.hovered_mask < len(self.masks):
-            mask = self.masks[self.hovered_mask]
+            mask = masks[self.hovered_mask]
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(mask.color))
             painter.setOpacity(0.85)
@@ -199,6 +333,18 @@ class MaskImageView(QWidget):
                 painter.drawRect(QRectF(self._points[0], self._cursor).normalized())
             else:
                 painter.drawPolyline(QPolygonF(self._points + [self._cursor]))
+        painter.restore()
+        handles = self._resize_handles() if not self._points else {}
+        if not self._points and not self._selection_rect().isEmpty():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor("#202020"), 2))
+            painter.drawRect(self._selection_rect())
+            painter.setPen(QPen(QColor("white"), 1, Qt.PenStyle.DashLine))
+            painter.drawRect(self._selection_rect())
+            painter.setPen(QPen(QColor("#202020"), 1))
+            painter.setBrush(QColor("white"))
+            for point in handles.values():
+                painter.drawRect(QRectF(point.x() - 4, point.y() - 4, 8, 8))
         painter.end()
 
     @override
@@ -207,6 +353,33 @@ class MaskImageView(QWidget):
             self.finish_polygon()
             return
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self.tool == "move":
+            self.setFocus()
+            index = self._mask_at(event.position(), prefer_selected=True)
+            self.set_selected_mask(index)
+            self.mask_selected.emit(index)
+            if index >= 0:
+                self._drag_original = self.masks[index]
+                self._drag_preview = self._drag_original
+                self._drag_handle = "move"
+                self._drag_start = event.position()
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
+        handle = self._resize_hit_test(event.position())
+        if handle:
+            self.setFocus()
+            self._drag_original = self.masks[self.selected_mask]
+            self._drag_preview = self._drag_original
+            self._drag_handle = handle
+            self._drag_start = event.position()
+            self._set_resize_cursor(handle)
+            return
+        if self.tool == "pointer":
+            self.setFocus()
+            index = self._mask_at(event.position())
+            self.set_selected_mask(index)
+            self.mask_selected.emit(index)
             return
         point = self._image_point(event.position())
         if point is None:
@@ -227,12 +400,25 @@ class MaskImageView(QWidget):
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._drag_original is not None:
+            self._update_drag(event.position())
+            return
+        self._set_resize_cursor(self._resize_hit_test(event.position()))
         self._cursor = self._image_point(event.position(), clamp=True)
         if self._points:
             self.update()
 
     @override
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_original is not None:
+            self._update_drag(event.position())
+            original, resized = self._drag_original, self._drag_preview
+            index = self.selected_mask
+            self._cancel_drag()
+            if resized is not None and resized != original:
+                self.mask_transformed.emit(index, resized)
+            self.update()
+            return
         if (event.button() != Qt.MouseButton.LeftButton or self.tool != "rectangle"
                 or not self._points):
             return
@@ -256,8 +442,14 @@ class MaskImageView(QWidget):
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape and self._points:
+        if event.key() == Qt.Key.Key_Escape and self._drag_original is not None:
+            self._cancel_drag()
+            self.update()
+        elif event.key() == Qt.Key.Key_Escape and self._points:
             self.cancel_drawing()
+        elif event.key() == Qt.Key.Key_Escape and self.selected_mask >= 0:
+            self.set_selected_mask(-1)
+            self.mask_selected.emit(-1)
         elif event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
             self.finish_polygon()
         elif event.key() == Qt.Key.Key_Backspace and self._points:
@@ -280,6 +472,7 @@ class MaskImageView(QWidget):
             self.cancel_drawing()
 
     def cancel_drawing(self) -> None:
+        self._cancel_drag()
         self._points.clear()
         self._cursor = None
         self.update()
@@ -373,6 +566,7 @@ class MaskEditorDialog(QDialog):
         self._hue = random.random()
         self.image_view = MaskImageView()
         self.image_view.polygon_created.connect(self._add_mask)
+        self.image_view.mask_transformed.connect(self._transform_mask)
         self.image_label = QLabel()
         self.image_label.setTextFormat(Qt.TextFormat.PlainText)
         self.image_label.setContentsMargins(12, 4, 12, 4)
@@ -381,9 +575,14 @@ class MaskEditorDialog(QDialog):
         tools = QVBoxLayout(toolbar)
         tools.setContentsMargins(0, 0, 0, 0)
         self.tool_group = QButtonGroup(self)
+        self.pointer_button = self._tool_button("pointer.svg", "Pointer — select mask")
+        self.move_button = self._tool_button("move.svg", "Move mask")
         self.rectangle_button = self._tool_button("rectangle.svg", "Rectangle")
         self.polygon_button = self._tool_button("polygon.svg", "Polygon")
-        for button, tool in ((self.rectangle_button, "rectangle"), (self.polygon_button, "polygon")):
+        for button, tool in (
+            (self.pointer_button, "pointer"), (self.move_button, "move"),
+            (self.rectangle_button, "rectangle"), (self.polygon_button, "polygon"),
+        ):
             self.tool_group.addButton(button)
             button.clicked.connect(lambda _checked=False, name=tool: self.image_view.set_tool(name))
             tools.addWidget(button)
@@ -426,12 +625,14 @@ class MaskEditorDialog(QDialog):
         mask_layout.addLayout(new_mask_alpha_row)
         mask_layout.addWidget(QLabel("Current masks · Alpha"))
         self.mask_list = MaskList()
+        self.image_view.mask_selected.connect(self.mask_list.setCurrentRow)
         self.mask_list.setMinimumWidth(280)
         self.mask_list.model().rowsMoved.connect(self._masks_reordered)
         mask_layout.addWidget(self.mask_list, 1)
         self.delete_button = QPushButton("Delete Selected Mask")
         self.delete_button.clicked.connect(self._delete_mask)
         self.mask_list.currentRowChanged.connect(lambda row: self.delete_button.setEnabled(row >= 0))
+        self.mask_list.currentRowChanged.connect(self.image_view.set_selected_mask)
         mask_layout.addWidget(self.delete_button)
         image_panel = QWidget()
         image_layout = QVBoxLayout(image_panel)
@@ -539,6 +740,11 @@ class MaskEditorDialog(QDialog):
                 row.name_label.setText(f"Mask {index + 1}")
                 row.alpha_input.setAccessibleName(f"Mask {index + 1} alpha")
         self.image_view.set_hovered_mask(-1)
+        self.image_view.set_selected_mask(self.mask_list.currentRow())
+        self._changed()
+
+    def _transform_mask(self, index: int, mask: MaskRegion) -> None:
+        self.current_masks[index] = mask
         self._changed()
 
     def _set_alpha(self, index: int, alpha: float) -> None:
