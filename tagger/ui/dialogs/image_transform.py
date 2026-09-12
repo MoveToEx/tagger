@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import override
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QFontMetrics
 from PySide6.QtWidgets import QComboBox,QDialog,QLabel,QMessageBox,QProgressBar,QVBoxLayout,QWidget
 from tagger.domain.models import ImageEntry
 from tagger.image_processing import convert_image
@@ -36,9 +36,10 @@ class _Worker(QRunnable):
 class ConvertProgressDialog(QDialog):
  completed=Signal(object)
  def __init__(self,paths,target,parent=None):
-  super().__init__(parent); self.setWindowTitle('Converting Images'); self.setWindowModality(Qt.WindowModality.WindowModal); self.label=QLabel('Preparing images...'); self.progress=QProgressBar(); self.progress.setRange(0,len(paths)); l=QVBoxLayout(self); l.addWidget(self.label); l.addWidget(self.progress); self._running=False; self._worker=_Worker(paths,target); self._worker.signals.progress.connect(self._update); self._worker.signals.completed.connect(self._complete)
+  super().__init__(parent); self.setWindowTitle('Converting Images'); self.setWindowModality(Qt.WindowModality.WindowModal); self.setFixedWidth(640); self.label=QLabel('Preparing images...'); self.label.setMinimumWidth(600); self.progress=QProgressBar(); self.progress.setRange(0,len(paths)); l=QVBoxLayout(self); l.addWidget(self.label); l.addWidget(self.progress); self._running=False; self._worker=_Worker(paths,target); self._worker.signals.progress.connect(self._update); self._worker.signals.completed.connect(self._complete)
  def start(self): self._running=True; QThreadPool.globalInstance().start(self._worker)
- def _update(self,d,t,n): self.progress.setRange(0,t); self.progress.setValue(d); self.label.setText(n)
+ def _update(self,d,t,n):
+  self.progress.setRange(0,t); self.progress.setValue(d); self.label.setToolTip(n); self.label.setText(QFontMetrics(self.label.font()).elidedText(n, Qt.TextElideMode.ElideMiddle, self.label.width()))
  def _complete(self,r): self._running=False; self.completed.emit(r); self.accept()
  def reject(self):
   if not self._running: super().reject()
