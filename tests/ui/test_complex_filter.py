@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import Qt
 
 from tagger.domain.models import ImageEntry
@@ -90,6 +91,27 @@ def test_complex_filter_executes_check_and_shows_matching_images(
     assert image_item.text() == "cat.png"
     assert dialog.result_label.text() == "1 matching image(s) out of 2."
     assert dialog.error_label.isHidden()
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
+@pytest.mark.parametrize("focused_widget", ["code_input", "results"])
+def test_complex_filter_ctrl_enter_runs_filter(qtbot, key, focused_widget) -> None:
+    entry = ImageEntry(Path("cat.png"), Path("cat.txt"), ["cat"], b"cat\n")
+    dialog = ComplexFilterDialog([entry])
+    qtbot.addWidget(dialog)
+    code = "def check(fn, tags):\n    return 'cat' in tags\n"
+    dialog.code_input.setPlainText(code)
+    dialog.show()
+    dialog.activateWindow()
+    widget = getattr(dialog, focused_widget)
+    widget.setFocus()
+    qtbot.waitUntil(widget.hasFocus)
+
+    qtbot.keyClick(widget, key, Qt.KeyboardModifier.ControlModifier)
+
+    assert dialog.matches == [entry]
+    assert dialog.results.rowCount() == 1
+    assert dialog.code_input.toPlainText() == code
 
 
 def test_complex_filter_reports_missing_check_function(qtbot) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -69,9 +69,15 @@ class ComplexFilterDialog(QDialog):
 
         self.run_button = QPushButton()
         self.run_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self.run_button.setToolTip("Run filter")
+        self.run_button.setToolTip("Run filter (Ctrl+Enter)")
         self.run_button.setAccessibleName("Run filter")
         self.run_button.clicked.connect(self.run_filter)
+        self.run_shortcut = QShortcut(self)
+        self.run_shortcut.setKeys(
+            [QKeySequence("Ctrl+Return"), QKeySequence("Ctrl+Enter")]
+        )
+        self.run_shortcut.setAutoRepeat(False)
+        self.run_shortcut.activated.connect(self.run_button.click)
         self.error_label = QLabel()
         self.error_label.setWordWrap(True)
         self.error_label.setStyleSheet("QLabel { color: #b42318; }")
