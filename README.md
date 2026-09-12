@@ -57,13 +57,13 @@ You can use <kbd>Space</kbd> to toggle a tag, <kbd>↑</kbd>/<kbd>↓</kbd> to s
 
 _Tags_ > _Complex Filter_ allows you to write custom Python scripts to filter out images with complex conditions.  
 
-The script contains a `check(fn: str, tags: set[str]) -> bool` function, which accepts the file name (relative to the open folder) and the tag list of an image. Images that the function returns `True` will be collected into a result table. Double clicking on one row will focus the image in the main window.
+The script contains a `check(fn: str, tags: TagSet) -> bool` function, which accepts the file name (relative to the open folder) and the tag set of an image. `TagSet` supports `*` wildcard patterns in membership checks, such as `"red*" in tags`, and `tags.matching("*hair*")` yields matching tags with their wildcard captures. The scripting setting can switch back to an exact `set[str]` parameter. Images that the function returns `True` will be collected into a result table. Double clicking on one row will focus the image in the main window.
 
 #### Bulk operation
 
 _Tags_ > _Bulk Operation_ allows you to programmatically apply changes to images' tags.  
 
-The script contains a `process(fn: str, tags: set[str]) -> set[str]` function which returns the new list of tags. After running all images through the script, the results are compared against the original ones to calculate the difference, and you need to review the differences image-by-image. 
+The script contains a `process(fn: str, tags: TagSet) -> set[str]` function which returns the new list of tags. The `tags` parameter follows the Complex Filter scripting setting, so it can be a wildcard-aware `TagSet` or an exact `set[str]`. After running all images through the script, the results are compared against the original ones to calculate the difference, and you need to review the differences image-by-image.
 
 #### Tag review
 

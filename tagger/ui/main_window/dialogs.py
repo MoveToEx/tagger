@@ -15,6 +15,7 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_DELETE_FILTER_SETTING,
     get_deletion_behavior,
     get_image_prefetch_count,
+    get_scripting_use_tag_set,
 )
 from tagger.settings.proxy import get_download_proxy
 from tagger.trash import UNLINK, delete_file
@@ -150,6 +151,7 @@ class DialogController:
             self.window.catalog.entries,
             self.window,
             root_directory=self.window.directory,
+            use_tag_set=get_scripting_use_tag_set(self.window.settings),
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setWindowFlag(Qt.WindowType.Window, True)
@@ -175,6 +177,7 @@ class DialogController:
             root_directory=self.window.directory,
             tag_library=self.window.tag_library,
             image_prefetch_count=get_image_prefetch_count(self.window.settings),
+            use_tag_set=get_scripting_use_tag_set(self.window.settings),
         )
         if (
             dialog.exec() == BulkOperationDialog.DialogCode.Accepted

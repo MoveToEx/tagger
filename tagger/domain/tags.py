@@ -5,6 +5,7 @@ import re
 from typing import Iterable, Sequence
 
 from tagger.domain.models import ImageEntry, TagOperation
+from tagger.scripting import TagSet
 
 
 def unique_tags(tags: Iterable[str]) -> list[str]:

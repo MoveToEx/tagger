@@ -23,10 +23,11 @@ from PySide6.QtWidgets import (
 )
 
 from tagger.domain.models import ImageEntry
+from tagger.scripting import TagSet
 from tagger.ui.python_syntax import PythonSyntaxHighlighter
 
 
-DEFAULT_FILTER_CODE = '''def check(fn: str, tags: set[str]) -> bool:
+DEFAULT_FILTER_CODE = '''def check(fn: str, tags: TagSet) -> bool:
     return True
 '''
 
@@ -40,18 +41,23 @@ class ComplexFilterDialog(QDialog):
         parent=None,
         *,
         root_directory: Path | None = None,
+        use_tag_set: bool = True,
     ) -> None:
         super().__init__(parent)
         self.entries = list(entries)
         self.root_directory = root_directory
+        self.use_tag_set = use_tag_set
+        self._tags_type_name = "TagSet" if use_tag_set else "set[str]"
         self.matches: list[ImageEntry] = []
         self.setWindowTitle("Complex Image Filter")
         self.resize(850, 680)
 
         self.code_input = QPlainTextEdit()
-        self.code_input.setPlainText(DEFAULT_FILTER_CODE)
+        self.code_input.setPlainText(
+            DEFAULT_FILTER_CODE.replace("TagSet", self._tags_type_name)
+        )
         self.code_input.setPlaceholderText(
-            "Define check(fn: str, tags: set[str]) -> bool here."
+            f"Define check(fn: str, tags: {self._tags_type_name}) -> bool here."
         )
         font = QFont("Consolas")
         font.setStyleHint(QFont.StyleHint.Monospace)
@@ -117,7 +123,7 @@ class ComplexFilterDialog(QDialog):
         self.error_label.hide()
         try:
             code = compile(self.code_input.toPlainText(), "<complex-filter>", "exec")
-            namespace: dict[str, object] = {}
+            namespace: dict[str, object] = {"TagSet": TagSet}
             exec(code, namespace)
         except Exception as exc:
             self._show_error(f"Could not compile or execute filter code: {exc}")
@@ -126,15 +132,18 @@ class ComplexFilterDialog(QDialog):
         check = namespace.get("check")
         if not callable(check):
             self._show_error(
-                "The filter code must define check(fn: str, tags: set[str]) -> bool."
+                "The filter code must define "
+                f"check(fn: str, tags: {self._tags_type_name}) -> bool."
             )
             return
-        check_function = cast(Callable[[str, set[str]], object], check)
+        check_function = cast(Callable[[str, TagSet | set[str]], object], check)
 
         matches: list[ImageEntry] = []
         for entry in self.entries:
             try:
-                matched = check_function(entry.image_path.name, set(entry.tags))
+                tags: TagSet | set[str]
+                tags = TagSet(entry.tags) if self.use_tag_set else set(entry.tags)
+                matched = check_function(entry.image_path.name, tags)
             except Exception as exc:
                 self._show_error(
                     f"check() failed for {entry.image_path.name}: {exc}"

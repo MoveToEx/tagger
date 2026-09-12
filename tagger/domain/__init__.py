@@ -11,6 +11,7 @@ from tagger.domain.review import (
     ReviewSession as ReviewSession,
 )
 from tagger.domain.tags import (
+    TagSet as TagSet,
     apply_tag_operation as apply_tag_operation,
     eligible_tags as eligible_tags,
     filter_traversal_entries as filter_traversal_entries,

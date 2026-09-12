@@ -9,11 +9,13 @@ from .domain import (
     TagOperation,
     TraversalSession,
 )
+from .scripting import TagSet
 
 __all__ = [
     "ImageEntry",
     "ReviewSession",
     "ScanResult",
     "TagOperation",
+    "TagSet",
     "TraversalSession",
 ]

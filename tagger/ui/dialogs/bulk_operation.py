@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from tagger.domain.models import ImageEntry
 from tagger.domain.tags import normalize_tags, parse_tags
+from tagger.scripting import TagSet
 from tagger.storage import (
     BatchCommitResult,
     BatchPreflightError,
@@ -42,7 +43,7 @@ from tagger.ui.preview.view import ImageView
 from tagger.ui.python_syntax import PythonSyntaxHighlighter
 
 
-DEFAULT_PROCESS_CODE = "def process(fn: str, tags: set[str]) -> set[str]:\n\treturn tags"
+DEFAULT_PROCESS_CODE = "def process(fn: str, tags: TagSet) -> set[str]:\n\treturn tags"
 ENTRY_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
@@ -75,6 +76,7 @@ class BulkOperationDialog(QDialog):
         root_directory: Path,
         tag_library: TagLibrary | None = None,
         image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
+        use_tag_set: bool = True,
     ) -> None:
         super().__init__(parent)
         self._entries = [entry for entry in entries if entry.editable]
@@ -84,6 +86,8 @@ class BulkOperationDialog(QDialog):
         self._changes: list[BulkChange] = []
         self._current_index = 0
         self._image_prefetch_count = max(0, image_prefetch_count)
+        self.use_tag_set = use_tag_set
+        self._tags_type_name = "TagSet" if use_tag_set else "set[str]"
         self._decisions: dict[int, BulkDecision] = {}
         self._loading_decision = False
         self._allow_close = False
@@ -138,9 +142,11 @@ class BulkOperationDialog(QDialog):
     def _create_code_page(self) -> QWidget:
         page = QWidget()
         self.code_input = QPlainTextEdit()
-        self.code_input.setPlainText(DEFAULT_PROCESS_CODE)
+        self.code_input.setPlainText(
+            DEFAULT_PROCESS_CODE.replace("TagSet", self._tags_type_name)
+        )
         self.code_input.setPlaceholderText(
-            "Define process(fn: str, tags: set[str]) -> set[str] here."
+            f"Define process(fn: str, tags: {self._tags_type_name}) -> set[str] here."
         )
         font = QFont("Consolas")
         font.setStyleHint(QFont.StyleHint.Monospace)
@@ -359,7 +365,7 @@ class BulkOperationDialog(QDialog):
         self.code_error_label.hide()
         try:
             code = compile(self.code_input.toPlainText(), "<bulk-operation>", "exec")
-            namespace: dict[str, object] = {}
+            namespace: dict[str, object] = {"TagSet": TagSet}
             exec(code, namespace)
         except Exception as exc:
             self._show_code_error(f"Could not compile or execute code: {exc}")
@@ -369,15 +375,19 @@ class BulkOperationDialog(QDialog):
         if not callable(process):
             self._show_code_error(
                 "The code must define "
-                "process(fn: str, tags: set[str]) -> set[str]."
+                f"process(fn: str, tags: {self._tags_type_name}) -> set[str]."
             )
             return
-        process_function = cast(Callable[[str, set[str]], object], process)
+        process_function = cast(
+            Callable[[str, TagSet | set[str]], object], process
+        )
 
         changes: list[BulkChange] = []
         for entry in self._checked_entries():
             try:
-                result = process_function(entry.image_path.name, set(entry.tags))
+                tags: TagSet | set[str]
+                tags = TagSet(entry.tags) if self.use_tag_set else set(entry.tags)
+                result = process_function(entry.image_path.name, tags)
             except Exception as exc:
                 self._show_code_error(
                     f"process() failed for {entry.image_path.name}: {exc}"

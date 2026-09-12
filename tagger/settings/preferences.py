@@ -24,6 +24,7 @@ USE_UNLINK_FOR_TIDY_SETTING = "general/use_unlink_for_tidy"
 USE_UNLINK_FOR_DEDUPLICATE_SETTING = "general/use_unlink_for_deduplicate"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
+SCRIPTING_TAGS_TYPE_SETTING = "scripting/tags_type"
 NO_PROXY = "none"
 SYSTEM_PROXY = "system"
 CUSTOM_PROXY = "custom"
@@ -36,6 +37,16 @@ CATALOG_CLICK_HOLD_BEHAVIORS = {
     CATALOG_NAVIGATE,
 }
 DEFAULT_CATALOG_CLICK_HOLD_BEHAVIOR = CATALOG_DRAG_AND_DROP
+
+SCRIPTING_TAG_SET = "tag_set"
+SCRIPTING_PLAIN_SET = "set"
+SCRIPTING_TAGS_TYPES = {SCRIPTING_TAG_SET, SCRIPTING_PLAIN_SET}
+DEFAULT_SCRIPTING_TAGS_TYPE = SCRIPTING_TAG_SET
+# Singular aliases keep the setting easy to discover for integrations.
+SCRIPTING_TAG_TYPE_SETTING = SCRIPTING_TAGS_TYPE_SETTING
+SCRIPTING_TAGS_SETTING = SCRIPTING_TAGS_TYPE_SETTING
+SCRIPTING_TAG_TYPES = SCRIPTING_TAGS_TYPES
+SCRIPTING_SET = SCRIPTING_PLAIN_SET
 
 
 def get_scrolling_behavior(settings: JsonSettings) -> str:
@@ -71,6 +82,21 @@ def get_image_prefetch_count(settings: JsonSettings) -> int:
 def get_use_unlink(settings: JsonSettings, key: str) -> bool:
     use_unlink = settings.value(key, False, type=bool)
     return use_unlink if isinstance(use_unlink, bool) else False
+
+
+def get_scripting_tags_type(settings: JsonSettings) -> str:
+    tags_type = settings.value(SCRIPTING_TAGS_TYPE_SETTING, None, type=str)
+    if isinstance(tags_type, str) and tags_type in SCRIPTING_TAGS_TYPES:
+        return tags_type
+    return DEFAULT_SCRIPTING_TAGS_TYPE
+
+
+def get_scripting_tag_type(settings: JsonSettings) -> str:
+    return get_scripting_tags_type(settings)
+
+
+def get_scripting_use_tag_set(settings: JsonSettings) -> bool:
+    return get_scripting_tags_type(settings) == SCRIPTING_TAG_SET
 
 
 def get_deletion_behavior(settings: JsonSettings, key: str) -> str:

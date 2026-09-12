@@ -43,6 +43,9 @@ from tagger.settings.preferences import (
     PARENTHESES_SETTING,
     PROXY_MODE_SETTING,
     PROXY_SETTING,
+    SCRIPTING_PLAIN_SET,
+    SCRIPTING_TAG_SET,
+    SCRIPTING_TAGS_TYPE_SETTING,
     SCROLLING_BEHAVIOR_SETTING,
     SYSTEM_PROXY,
     UNDERSCORES_SETTING,
@@ -52,6 +55,7 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_TIDY_SETTING,
     get_catalog_click_hold_behavior,
     get_image_prefetch_count,
+    get_scripting_tags_type,
     get_scrolling_behavior,
     get_use_unlink,
 )
@@ -129,6 +133,9 @@ class SettingsDialog(QDialog):
         self._applied_image_prefetch_count = get_image_prefetch_count(
             self.settings
         )
+        self._applied_scripting_tags_type = get_scripting_tags_type(
+            self.settings
+        )
         self._applied_open_recent_folder_on_startup = cast(
             bool,
             self.settings.value(
@@ -166,10 +173,12 @@ class SettingsDialog(QDialog):
         self.models_page = self._create_models_page()
         self.tag_library_dialog: DownloadTagsDialog | None = None
         self.autocomplete_page = self._create_autocomplete_page()
+        self.scripting_page = self._create_scripting_page()
         self.proxy_page = self._create_proxy_page()
         self.pages.addWidget(self.general_page)
         self.pages.addWidget(self.models_page)
         self.pages.addWidget(self.autocomplete_page)
+        self.pages.addWidget(self.scripting_page)
         self.pages.addWidget(self.proxy_page)
 
         self.general_item = self._add_navigation_item(
@@ -181,6 +190,10 @@ class SettingsDialog(QDialog):
         self.autocomplete_item = self._add_navigation_item(
             "Autocomplete", self.autocomplete_page
         )
+        self.scripting_item = self._add_navigation_item(
+            "Scripting", self.scripting_page, parent=self.general_item
+        )
+        self.general_item.setExpanded(True)
         self.network_item = QTreeWidgetItem(["Network"])
         self.network_item.setFlags(
             self.network_item.flags() & ~Qt.ItemFlag.ItemIsSelectable
@@ -553,6 +566,36 @@ class SettingsDialog(QDialog):
     def _tag_library_dialog_finished(self, _result: int) -> None:
         self.tag_library_dialog = None
 
+    def _create_scripting_page(self) -> QWidget:
+        page = QWidget()
+        self.scripting_group = QGroupBox("Python scripting")
+        self.scripting_tags_input = QComboBox()
+        self.scripting_tags_input.addItem(
+            "TagSet", SCRIPTING_TAG_SET
+        )
+        self.scripting_tags_input.addItem(
+            "set[str]", SCRIPTING_PLAIN_SET
+        )
+        stabilize_widget_size(self.scripting_tags_input)
+        selected_index = self.scripting_tags_input.findData(
+            self._applied_scripting_tags_type
+        )
+        self.scripting_tags_input.setCurrentIndex(selected_index)
+        self.scripting_tag_type_input = self.scripting_tags_input
+        self.scripting_mode_input = self.scripting_tags_input
+        self.tags_input = self.scripting_tags_input
+
+        form = QFormLayout(self.scripting_group)
+        form.addRow("Tags parameter", self.scripting_tags_input)
+
+        page_layout = QVBoxLayout(page)
+        page_layout.addWidget(self.scripting_group)
+        page_layout.addStretch(1)
+        self.scripting_tags_input.currentIndexChanged.connect(
+            self._settings_changed
+        )
+        return page
+
     def _create_proxy_page(self) -> QWidget:
         page = QWidget()
         self.proxy_server_group = QGroupBox("Proxy server")
@@ -616,6 +659,8 @@ class SettingsDialog(QDialog):
             or self._use_unlink_options()
             != self._applied_use_unlink_options
             or self._transform_options() != self._applied_transform_options
+            or self._scripting_tags_type()
+            != self._applied_scripting_tags_type
             or self._proxy_preferences()
             != (self._applied_proxy_mode, self._applied_proxy_url)
         )
@@ -646,6 +691,10 @@ class SettingsDialog(QDialog):
             self.deduplicate_use_unlink_checkbox.isChecked(),
         )
 
+    def _scripting_tags_type(self) -> str:
+        tags_type = self.scripting_tags_input.currentData()
+        return tags_type if isinstance(tags_type, str) else SCRIPTING_TAG_SET
+
     def _proxy_preferences(self) -> tuple[str, str]:
         if self.system_proxy_radio.isChecked():
             mode = SYSTEM_PROXY
@@ -665,6 +714,7 @@ class SettingsDialog(QDialog):
         underscores = self.underscores_checkbox.isChecked()
         parentheses = self.parentheses_checkbox.isChecked()
         use_unlink_options = self._use_unlink_options()
+        scripting_tags_type = self._scripting_tags_type()
         proxy_mode, proxy_url = self._proxy_preferences()
         proxy = _resolved_proxy(proxy_mode, proxy_url)
         self.settings.setValue(SCROLLING_BEHAVIOR_SETTING, scrolling_behavior)
@@ -698,6 +748,9 @@ class SettingsDialog(QDialog):
             USE_UNLINK_FOR_DEDUPLICATE_SETTING,
             use_unlink_options[3],
         )
+        self.settings.setValue(
+            SCRIPTING_TAGS_TYPE_SETTING, scripting_tags_type
+        )
         self.settings.setValue(PROXY_MODE_SETTING, proxy_mode)
         self.settings.setValue(PROXY_SETTING, proxy_url)
         self.settings.sync()
@@ -723,6 +776,7 @@ class SettingsDialog(QDialog):
         )
         self._applied_transform_options = (underscores, parentheses)
         self._applied_use_unlink_options = use_unlink_options
+        self._applied_scripting_tags_type = scripting_tags_type
         self._applied_proxy_mode = proxy_mode
         self._applied_proxy_url = proxy_url
         self.apply_button.setEnabled(False)
