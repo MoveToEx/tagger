@@ -112,6 +112,8 @@ class WindowActions:
         self.remove_transparency_action.triggered.connect(
             self.window.dialogs._open_remove_transparency
         )
+        self.mask_editor_action = QAction("Mask Editor...", self.window)
+        self.mask_editor_action.triggered.connect(self.window.dialogs._open_mask_editor)
 
         self.settings_action = QAction("Settings...", self.window)
         self.settings_action.triggered.connect(self.window.dialogs._open_settings)
@@ -235,10 +237,9 @@ class WindowActions:
         image_menu = self.window.menuBar().addMenu("&Image")
         image_menu.addAction(self.delete_filter_action)
         image_menu.addAction(self.deduplicate_action)
-        self._create_alpha_menu(image_menu)
-        image_menu.aboutToShow.connect(
-            lambda menu=image_menu: self._ensure_alpha_menu(menu)
-        )
+        image_menu.addSeparator()
+        image_menu.addAction(self.remove_transparency_action)
+        image_menu.addAction(self.mask_editor_action)
         tags_menu = self.window.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
         tags_menu.addAction(self.review_action)
@@ -258,6 +259,8 @@ class WindowActions:
         view_menu.addSeparator()
         view_menu.addAction(self.zoom_in_action)
         view_menu.addAction(self.zoom_out_action)
+        view_menu.addSeparator()
+        self._create_alpha_menu(view_menu)
 
         toolbar = QToolBar("Main", self.window)
         toolbar.setMovable(False)
@@ -313,9 +316,12 @@ class WindowActions:
         self.delete_filter_action.setEnabled(count > 0)
         self.deduplicate_action.setEnabled(count >= 2)
         self.transform_images_action.setEnabled(count > 0)
+        self.mask_editor_action.setEnabled(count > 0)
         self.remove_transparency_action.setEnabled(has_directory)
         if self.alpha_menu is not None:
-            self.alpha_menu.setEnabled(has_current)
+            self.alpha_menu.setEnabled(count > 0)
+        for action in self.alpha_actions.values():
+            action.setEnabled(has_current)
         self.review_action.setEnabled(count > 0 and any(entry.editable and entry.tags for entry in self.window.catalog.entries))
         self.complex_filter_action.setEnabled(count > 0)
         has_previous = (
@@ -350,18 +356,10 @@ class WindowActions:
         for name, action in self.alpha_actions.items():
             action.setChecked(name == self.window.image_view.alpha_mode)
 
-    def _ensure_alpha_menu(self, image_menu) -> None:
-        if self.alpha_menu is not None:
-            if self.alpha_menu.menuAction() not in image_menu.actions():
-                image_menu.addSeparator()
-                image_menu.addAction(self.alpha_menu.menuAction())
-            return
-        self._create_alpha_menu(image_menu)
-
-    def _create_alpha_menu(self, image_menu) -> None:
+    def _create_alpha_menu(self, view_menu: QMenu) -> None:
         if self.alpha_menu is not None:
             return
-        self.alpha_menu = QMenu("Alpha", image_menu)
+        self.alpha_menu = view_menu.addMenu("Alpha")
         labels = {"keep": "Keep", "ignore": "Ignore", "exclusive": "Exclusive"}
         for mode in ALPHA_DISPLAY_FILTERS:
             labels.setdefault(mode, mode.replace("_", " ").title())
@@ -374,6 +372,4 @@ class WindowActions:
                 )
             )
             self.alpha_actions[mode] = action
-        self.alpha_menu.addSeparator()
-        self.alpha_menu.addAction(self.remove_transparency_action)
         self.alpha_actions["keep"].setChecked(True)

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMenu, QMess
 
 from tagger.domain.models import ImageEntry
 from tagger.image_processing import image_has_alpha
+from tagger.mask_storage import mask_editing_disabled_reason
 from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
@@ -264,6 +265,16 @@ class FileActions:
                         initial_paths=[image_path]
                     )
                 )
+            mask_editor_action = send_to_menu.addAction("Mask Editor...")
+            disabled_reason = mask_editing_disabled_reason(image_path)
+            mask_editor_action.setEnabled(has_entry and disabled_reason is None)
+            if disabled_reason:
+                mask_editor_action.setToolTip(disabled_reason)
+            mask_editor_action.triggered.connect(
+                lambda _checked=False: self.window.dialogs._open_mask_editor(
+                    initial_paths=[image_path]
+                )
+            )
         return menu
 
     def _edit_current_image(self) -> None:

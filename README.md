@@ -91,6 +91,27 @@ The catalog click-and-hold behavior can also be set under _Settings_ >
 _General_ > _Behavior_: choose _Drag and drop_ to move images between folders,
 or _Navigate_ to change the selected image without moving files.
 
+#### Mask editor
+
+_Image_ > _Mask Editor_ opens the folder/image picker. JPEG files are disabled
+because they cannot store alpha. Continue shows a warning that saving replaces
+existing alpha masks on edited images.
+Right-click an image and choose _Send to_ > _Mask Editor_ to preselect that image.
+
+Drag to draw a rectangle, or click polygon vertices and press Enter, double-click,
+or click the first vertex to finish. Esc cancels an unfinished shape. Each region
+gets a contrasting color and an editable alpha from 0 (transparent) to 1 (opaque).
+Hover a mask in the list to highlight it at 85% opacity. Colored overlays use
+15% opacity; use the eye button to preview actual transparency. Base alpha sets
+the opacity of areas outside all masks and defaults to 1. Drag a mask's handle
+to reorder the list; masks at the top take priority over masks below them.
+New mask alpha sets the initial alpha for subsequently drawn shapes and defaults
+to 0. It stays selected when navigating between images.
+
+Previous/Next retain each image's masks in memory. Save Changes writes edited
+images in place, rounding alpha to 0–255. PNG, WebP, and single-frame TIFF are
+supported.
+
 #### AI tagging
 
 _Tags_ > _AI Tagging_ allows you to tag images with AI models.  

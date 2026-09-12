@@ -35,7 +35,10 @@ def test_image_menu_exposes_delete_filter_for_open_folder(
         for menu in window.menuBar().findChildren(QMenu)
         if menu.title() == "&Image"
     )
-    assert image_menu.actions() == [window.commands.delete_filter_action, window.commands.deduplicate_action]
+    assert image_menu.actions()[:2] == [
+        window.commands.delete_filter_action,
+        window.commands.deduplicate_action,
+    ]
     assert window.commands.delete_filter_action.text() == "Delete Filter..."
     assert not window.commands.delete_filter_action.isEnabled()
 

@@ -348,7 +348,7 @@ def test_image_context_menu_sends_only_selected_image_to_ai_tagging(
     assert isinstance(send_to, QMenu)
     assert send_to.title() == "Send to"
     assert [action.text() for action in send_to.actions()] == [
-        "AI Tagging..."
+        "AI Tagging...", "Convert...", "Mask Editor..."
     ]
     send_to.actions()[0].trigger()
 

@@ -35,6 +35,35 @@ def test_navigation_actions_stop_at_boundaries(qtbot, tmp_path: Path) -> None:
     assert window.commands.previous_action.isEnabled()
 
 
+def test_view_alpha_modes_and_image_editing_action_group(qtbot, tmp_path: Path) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    menus = window.menuBar().findChildren(QMenu)
+    view_menu = next(menu for menu in menus if menu.title() == "&View")
+    image_menu = next(menu for menu in menus if menu.title() == "&Image")
+    alpha_menu = window.commands.alpha_menu
+    assert alpha_menu is not None
+    assert alpha_menu.parentWidget() is view_menu
+    assert alpha_menu.menuAction() in view_menu.actions()
+    assert alpha_menu.menuAction() not in image_menu.actions()
+    actions = alpha_menu.actions()
+    assert actions == list(window.commands.alpha_actions.values())
+    image_actions = image_menu.actions()
+    assert image_actions[-3].isSeparator()
+    assert image_actions[-2:] == [
+        window.commands.remove_transparency_action, window.commands.mask_editor_action,
+    ]
+    assert not alpha_menu.isEnabled()
+    create_png(tmp_path / "sample.png")
+    window.folders._load_directory(tmp_path, show_issues=False)
+    assert alpha_menu.isEnabled()
+    assert all(action.isEnabled() for action in actions if not action.isSeparator())
+    window.commands.alpha_actions["ignore"].trigger()
+    assert window.image_view.alpha_mode == "ignore"
+    assert window.commands.alpha_actions["ignore"].isChecked()
+    assert not window.commands.alpha_actions["keep"].isChecked()
+
+
 def test_toolbar_uses_navigation_and_zoom_icons(
     qtbot, tmp_path: Path
 ) -> None:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-import time
+import threading
 
 from tagger.domain.models import ImageEntry
-from tagger.ui.dialogs.image_transform import ImageTransformDialog
+from tagger.ui.dialogs.image_transform import ConvertProgressDialog, ImageTransformDialog
 import tagger.ui.dialogs.image_transform as image_transform
+
+from .helpers import assert_stable_widget_size, create_png
 
 
 def _entry(path: Path) -> ImageEntry:
@@ -16,25 +18,44 @@ def test_transform_runs_conversion_off_the_gui_thread(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
     source = tmp_path / "source.png"
-    source.write_bytes(b"source")
+    create_png(source)
     output = tmp_path / "source.jpg"
     calls: list[tuple[Path, str, bool]] = []
+    thread_ids: list[int] = []
+    started = threading.Event()
+    release = threading.Event()
 
-    def slow_convert(path: Path, target_format: str, *, overwrite: bool) -> Path:
+    def slow_convert(path: Path, target_format: str, *, overwrite: bool = False) -> Path:
         calls.append((path, target_format, overwrite))
-        time.sleep(0.15)
+        thread_ids.append(threading.get_ident())
+        started.set()
+        assert release.wait(timeout=5)
         return output
 
     monkeypatch.setattr(image_transform, "convert_image", slow_convert)
-    dialog = ImageTransformDialog([_entry(source)])
+    selection = ImageTransformDialog([_entry(source)])
+    qtbot.addWidget(selection)
+    assert_stable_widget_size(selection.format_combo)
+    selection.format_combo.setCurrentText("JPEG")
+    selection.remove_button.click()
+    assert selection.result() == selection.DialogCode.Accepted
+    assert selection.selected_paths_for_conversion == [source]
+    assert selection.target_format == "jpg"
+    assert calls == []
+    dialog = ConvertProgressDialog(selection.selected_paths_for_conversion, selection.target_format)
     qtbot.addWidget(dialog)
-
-    dialog._start()
-    assert dialog._running
-    assert dialog._worker is not None
-    assert dialog.status_label.text() == "Choose an output format."
-
+    results = []
+    dialog.completed.connect(results.append)
+    try:
+        dialog.start()
+        qtbot.waitUntil(started.is_set, timeout=3000)
+        assert dialog._running
+        assert len(thread_ids) == 1
+        assert thread_ids[0] != threading.get_ident()
+    finally:
+        release.set()
     qtbot.waitUntil(lambda: not dialog._running, timeout=3000)
     assert calls == [(source, "jpg", False)]
-    assert dialog.converted_paths == [output]
-    assert dialog.progress_bar.value() == 1
+    assert results == [([output], [])]
+    assert dialog.progress.value() == 1
+    assert dialog.result() == dialog.DialogCode.Accepted

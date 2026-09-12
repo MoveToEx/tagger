@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import override
 
@@ -38,9 +39,13 @@ class TransparencySelectionDialog(QDialog):
         *,
         root_directory: Path | None = None,
         initial_paths: list[Path] | None = None,
+        disabled_reason: Callable[[Path], str | None] | None = None,
+        title: str = "Remove Transparency",
+        prompt: str = "Select images to remove transparency from",
+        action_text: str = "Remove Transparency",
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Remove Transparency")
+        self.setWindowTitle(title)
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(700, 560)
 
@@ -56,7 +61,7 @@ class TransparencySelectionDialog(QDialog):
         self.selection_label = QLabel()
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
-        self.remove_button = QPushButton("Remove Transparency")
+        self.remove_button = QPushButton(action_text)
         self.remove_button.clicked.connect(self._accept_selection)
 
         buttons = QHBoxLayout()
@@ -65,7 +70,7 @@ class TransparencySelectionDialog(QDialog):
         buttons.addWidget(self.remove_button)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Select images to remove transparency from"))
+        layout.addWidget(QLabel(prompt))
         layout.addWidget(self.folder_tree, 1)
         layout.addWidget(self.selection_label)
         layout.addLayout(buttons)
@@ -124,6 +129,11 @@ class TransparencySelectionDialog(QDialog):
                 0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
             )
             parent_item.addChild(item)
+            reason = disabled_reason(entry.image_path) if disabled_reason else None
+            if reason:
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+                item.setDisabled(True)
+                item.setToolTip(0, f"{entry.image_path}\n{reason}")
 
         self.image_selection.expandAll()
         self._refresh_check_states(root_item)
@@ -151,7 +161,7 @@ class TransparencySelectionDialog(QDialog):
     ) -> None:
         for index in range(item.childCount()):
             child = item.child(index)
-            if child is None:
+            if child is None or child.isDisabled():
                 continue
             child.setCheckState(0, state)
             self._set_descendant_check_state(child, state)
@@ -164,6 +174,7 @@ class TransparencySelectionDialog(QDialog):
                 child.checkState(0)
                 for index in range(item.childCount())
                 if (child := item.child(index)) is not None
+                and not child.isDisabled()
             ]
             if states and all(state == Qt.CheckState.Checked for state in states):
                 item.setCheckState(0, Qt.CheckState.Checked)
@@ -184,7 +195,12 @@ class TransparencySelectionDialog(QDialog):
             child.checkState(0)
             for index in range(item.childCount())
             if (child := item.child(index)) is not None
+            and not child.isDisabled()
         ]
+        if not states:
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+            item.setDisabled(True)
+            return
         if states and all(state == Qt.CheckState.Checked for state in states):
             item.setCheckState(0, Qt.CheckState.Checked)
         elif states and all(state == Qt.CheckState.Unchecked for state in states):
@@ -197,7 +213,7 @@ class TransparencySelectionDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.folder_tree)
         while iterator.value() is not None:
             item = iterator.value()
-            if item.checkState(0) == Qt.CheckState.Checked:
+            if not item.isDisabled() and item.checkState(0) == Qt.CheckState.Checked:
                 value = item.data(0, Qt.ItemDataRole.UserRole + 1)
                 if isinstance(value, ImageEntry):
                     checked_paths.add(value.image_path)

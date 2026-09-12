@@ -24,6 +24,7 @@ from tagger.ui.dialogs.complex_filter import ComplexFilterDialog
 from tagger.ui.dialogs.deduplicate import DeduplicateDialog
 from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
 from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
+from tagger.ui.dialogs.mask_editor import MaskEditorDialog, MaskSelectionDialog
 from tagger.ui.dialogs.review import ReviewDialog
 from tagger.ui.dialogs.traversal import TraversalDialog
 from tagger.ui.dialogs.image_transform import ImageTransformDialog, ConvertProgressDialog
@@ -229,6 +230,30 @@ class DialogController:
                 self.window.statusBar().showMessage(
                     f"Converted {len(result[0][0])} image(s).", 4000
                 )
+
+    def _open_mask_editor(self, *, initial_paths: list[Path] | None = None) -> None:
+        if not self.window.catalog.entries:
+            return
+        selection = MaskSelectionDialog(
+            list(self.window.catalog.entries), self.window,
+            root_directory=self.window.directory,
+            initial_paths=initial_paths,
+        )
+        if selection.exec() != MaskSelectionDialog.DialogCode.Accepted:
+            return
+        editor = MaskEditorDialog(selection.selected_paths, self.window)
+        editor.exec()
+        if editor.saved_paths and self.window.directory is not None:
+            current = self.window._current_entry()
+            self.window.preview_loader.clear()
+            self.window.folders._load_directory(
+                self.window.directory,
+                preferred_image=current.image_path if current else None,
+                show_issues=False,
+            )
+            self.window.statusBar().showMessage(
+                f"Saved masks for {len(editor.saved_paths)} image(s).", 4000
+            )
 
     def _open_remove_transparency(
         self, *, initial_paths: list[Path] | None = None
