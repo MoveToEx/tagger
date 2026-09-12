@@ -110,11 +110,13 @@ def test_archive_action_compresses_open_folder_without_hierarchy(
     nested.mkdir(parents=True)
     create_png(nested / "sample.png")
     (nested / "sample.txt").write_bytes(b"cat\n")
+    create_png(source / "excluded.png")
+    (source / "excluded.txt").write_bytes(b"not archived\n")
     window = MainWindow()
     qtbot.addWidget(window)
     window.folders._load_directory(source, show_issues=False)
     monkeypatch.setattr(
-        window_files.QFileDialog,
+        archive_module.QFileDialog,
         "getSaveFileName",
         lambda *_args: (str(destination), "Zip archives (*.zip)"),
     )
@@ -123,6 +125,24 @@ def test_archive_action_compresses_open_folder_without_hierarchy(
     assert window.commands.archive_action.isEnabled()
     window.commands.archive_action.trigger()
 
+    assert window.files._archive_selection_dialog is not None
+    selection = window.files._archive_selection_dialog
+    assert selection.isVisible()
+    assert selection.selection_label.text() == "2 image(s) selected."
+    root = selection.folder_tree.topLevelItem(0)
+    assert root is not None
+    excluded = next(
+        root.child(index)
+        for index in range(root.childCount())
+        if root.child(index) is not None
+        and root.child(index).text(0) == "excluded.png"
+    )
+    excluded.setCheckState(0, Qt.CheckState.Unchecked)
+    assert selection.selection_label.text() == "1 image(s) selected."
+    selection.browse_button.click()
+    assert selection.output_file_input.text() == str(destination)
+    selection.archive_button.click()
+
     assert window.files._archive_dialog is not None
     assert window.files._archive_dialog.isVisible()
     qtbot.waitUntil(lambda: destination.exists())
@@ -130,6 +150,7 @@ def test_archive_action_compresses_open_folder_without_hierarchy(
     with zipfile.ZipFile(destination) as archive:
         assert archive.namelist() == ["sample.png", "sample.txt"]
         assert archive.read("sample.txt") == b"cat\n"
+        assert "excluded.png" not in archive.namelist()
     assert "Archived 1 image/tag pair" in window.statusBar().currentMessage()
 
 
@@ -150,16 +171,16 @@ def test_archive_progress_window_shows_current_file(
         return ArchiveResult([("sample.png", "sample.txt")])
 
     monkeypatch.setattr(archive_module, "archive_entries", fake_archive_entries)
-    monkeypatch.setattr(
-        window_files.QFileDialog,
-        "getSaveFileName",
-        lambda *_args: (str(destination), "Zip archives (*.zip)"),
-    )
     window = MainWindow()
     qtbot.addWidget(window)
     window.folders._load_directory(source, show_issues=False)
 
     window.commands.archive_action.trigger()
+    qtbot.waitUntil(lambda: window.files._archive_selection_dialog is not None)
+    selection = window.files._archive_selection_dialog
+    assert selection is not None
+    selection.output_file_input.setText(str(destination))
+    selection.archive_button.click()
     try:
         qtbot.waitUntil(
             lambda: window.files._archive_dialog is not None
