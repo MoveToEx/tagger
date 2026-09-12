@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import override
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -16,6 +18,62 @@ from PySide6.QtWidgets import (
 
 from tagger.domain.models import ImageEntry
 from tagger.image_processing import convert_image
+
+
+class _TransformSignals(QObject):
+    progress = Signal(int, int, str)
+    completed = Signal(object)
+
+
+class _TransformOperation:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        overwrite: bool = False,
+        skipped: bool = False,
+    ) -> None:
+        self.path = path
+        self.overwrite = overwrite
+        self.skipped = skipped
+
+
+class _TransformWorker(QRunnable):
+    def __init__(self, operations: list[_TransformOperation], target_format: str) -> None:
+        super().__init__()
+        self.operations = operations
+        self.target_format = target_format
+        self.signals = _TransformSignals()
+
+    @override
+    def run(self) -> None:
+        converted: list[Path] = []
+        failures: list[str] = []
+        total = len(self.operations)
+        for number, operation in enumerate(self.operations, 1):
+            if operation.skipped:
+                self.signals.progress.emit(
+                    number, total, f"Skipped: {operation.path.name}"
+                )
+                continue
+
+            self.signals.progress.emit(
+                number - 1, total, f"Transforming: {operation.path.name}"
+            )
+            try:
+                output = convert_image(
+                    operation.path,
+                    self.target_format,
+                    overwrite=operation.overwrite,
+                )
+            except (OSError, ValueError) as exc:
+                failures.append(f"{operation.path.name}: {exc}")
+            else:
+                if output is not None:
+                    converted.append(output)
+            self.signals.progress.emit(number, total, operation.path.name)
+
+        self.signals.completed.emit((converted, failures))
 
 
 class ImageTransformDialog(QDialog):
@@ -60,6 +118,7 @@ class ImageTransformDialog(QDialog):
         self._entries = list(entries)
         self.converted_paths: list[Path] = []
         self._running = False
+        self._worker: _TransformWorker | None = None
 
     def _start(self) -> None:
         if self._running:
@@ -79,9 +138,9 @@ class ImageTransformDialog(QDialog):
         self._running = True
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setEnabled(False)
-        self.progress_bar.setRange(0, len(candidates))
-        failures: list[str] = []
-        for number, path in enumerate(candidates, 1):
+        self.format_combo.setEnabled(False)
+        operations: list[_TransformOperation] = []
+        for path in candidates:
             destination = path.with_suffix(f".{target_format}")
             overwrite = False
             if destination.exists():
@@ -97,21 +156,35 @@ class ImageTransformDialog(QDialog):
                 if answer == QMessageBox.StandardButton.Cancel:
                     break
                 if answer != QMessageBox.StandardButton.Yes:
-                    self.progress_bar.setValue(number)
-                    self.status_label.setText(f"Skipped: {path.name}")
+                    operations.append(_TransformOperation(path, skipped=True))
                     continue
                 overwrite = True
-            self.status_label.setText(f"Transforming: {path.name}")
-            try:
-                output = convert_image(path, target_format, overwrite=overwrite)
-            except (OSError, ValueError) as exc:
-                failures.append(f"{path.name}: {exc}")
-            else:
-                if output is not None:
-                    self.converted_paths.append(output)
-            self.progress_bar.setValue(number)
+            operations.append(
+                _TransformOperation(path, overwrite=overwrite)
+            )
 
+        if not operations:
+            self._finish(([], []))
+            return
+
+        self.progress_bar.setRange(0, len(operations))
+        self.progress_bar.setValue(0)
+        self._worker = _TransformWorker(operations, target_format)
+        self._worker.signals.progress.connect(self._update_progress)
+        self._worker.signals.completed.connect(self._finish)
+        QThreadPool.globalInstance().start(self._worker)
+
+    def _update_progress(self, completed: int, total: int, status: str) -> None:
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(completed)
+        self.status_label.setText(status)
+
+    def _finish(self, result: tuple[list[Path], list[str]]) -> None:
+        converted, failures = result
+        self.converted_paths = converted
+        self._worker = None
         self._running = False
+        self.progress_bar.setValue(self.progress_bar.maximum())
         if failures:
             QMessageBox.warning(
                 self,
@@ -125,3 +198,10 @@ class ImageTransformDialog(QDialog):
         if self._running:
             return
         super().reject()
+
+    @override
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._running:
+            event.ignore()
+            return
+        super().closeEvent(event)

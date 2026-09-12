@@ -991,6 +991,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "imagehash" },
+    { name = "pillow" },
     { name = "pyside6" },
 ]
 
@@ -1013,6 +1014,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "imagehash", specifier = ">=4.3.2" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "pyside6", specifier = ">=6.8,<7" },
 ]
 
