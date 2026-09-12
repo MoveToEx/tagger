@@ -4,7 +4,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QItemSelectionModel, QProcess
+from PySide6.QtCore import QItemSelectionModel, QProcess, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMenu, QMessageBox
 
@@ -22,7 +22,7 @@ from tagger.storage import (
     rename_image_pair,
 )
 from tagger.trash import UNLINK, delete_file
-from tagger.ui.dialogs.archive import ArchiveProgressDialog
+from tagger.ui.dialogs.archive import ArchiveDialog, ArchiveProgressDialog
 
 
 if TYPE_CHECKING:
@@ -35,6 +35,7 @@ class FileActions:
     def __init__(self, window: MainWindow) -> None:
         self.window = window
         self._archive_dialog: ArchiveProgressDialog | None = None
+        self._archive_selection_dialog: ArchiveDialog | None = None
         self._archive_destination: Path | None = None
         self._image_editor_processes: set[QProcess] = set()
 
@@ -123,7 +124,11 @@ class FileActions:
             )
 
     def _archive_folder(self) -> None:
-        if not self.window.catalog.entries:
+        if (
+            not self.window.catalog.entries
+            or self._archive_dialog is not None
+            or self._archive_selection_dialog is not None
+        ):
             return
         directory = self.window.directory
         start = (
@@ -131,27 +136,45 @@ class FileActions:
             if directory is not None
             else Path("images.zip")
         )
-        selected, _selected_filter = QFileDialog.getSaveFileName(
+        dialog = ArchiveDialog(
+            list(self.window.catalog.entries),
             self.window,
-            "Archive Image and Tag Pairs",
-            str(start),
-            "Zip archives (*.zip)",
+            root_directory=directory,
+            initial_destination=start,
         )
-        if not selected:
-            return
-        destination = Path(selected)
-        if destination.suffix.casefold() != ".zip":
-            destination = Path(f"{destination}.zip")
-        dialog = ArchiveProgressDialog(
-            list(self.window.catalog.entries), destination, self.window
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(
+            partial(self._archive_selection_finished, dialog)
         )
-        dialog.completed.connect(self._archive_completed)
-        dialog.failed.connect(self._archive_failed)
-        self._archive_dialog = dialog
-        self._archive_destination = destination
+        self._archive_selection_dialog = dialog
         self.window.commands._update_action_states()
         dialog.show()
-        dialog.start()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _archive_selection_finished(
+        self, dialog: ArchiveDialog, result: int
+    ) -> None:
+        if self._archive_selection_dialog is dialog:
+            self._archive_selection_dialog = None
+        self.window.commands._update_action_states()
+        if result != ArchiveDialog.DialogCode.Accepted:
+            return
+        destination = dialog.destination
+        entries = dialog.selected_entries
+        if destination is None or not entries:
+            return
+
+        progress_dialog = ArchiveProgressDialog(
+            entries, destination, self.window
+        )
+        progress_dialog.completed.connect(self._archive_completed)
+        progress_dialog.failed.connect(self._archive_failed)
+        self._archive_dialog = progress_dialog
+        self._archive_destination = destination
+        self.window.commands._update_action_states()
+        progress_dialog.show()
+        progress_dialog.start()
 
     def _archive_completed(self, archived_count: int) -> None:
         destination = self._archive_destination

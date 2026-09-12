@@ -304,7 +304,9 @@ class WindowActions:
         self.rescan_action.setEnabled(has_directory)
         self.tidy_action.setEnabled(has_directory)
         self.archive_action.setEnabled(
-            count > 0 and self.window.files._archive_dialog is None
+            count > 0
+            and self.window.files._archive_dialog is None
+            and self.window.files._archive_selection_dialog is None
         )
         self.window.search_input.setEnabled(count > 0)
         self.global_search_action.setEnabled(count > 0)
