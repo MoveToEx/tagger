@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMenu, QMessageBox
 
 from tagger.domain.models import ImageEntry
+from tagger.image_processing import image_has_alpha
 from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
@@ -227,6 +228,15 @@ class FileActions:
                     initial_image_path=image_path
                 )
             )
+            if image_has_alpha(image_path):
+                transparency_action = send_to_menu.addAction(
+                    "Remove Transparency..."
+                )
+                transparency_action.triggered.connect(
+                    lambda _checked=False: self.window.dialogs._open_remove_transparency(
+                        initial_paths=[image_path]
+                    )
+                )
         return menu
 
     def _edit_current_image(self) -> None:

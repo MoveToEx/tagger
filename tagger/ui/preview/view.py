@@ -14,6 +14,10 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QLabel, QScrollArea
 
+from tagger.image_processing import (
+    ALPHA_DISPLAY_FILTERS,
+    apply_alpha_display_filter,
+)
 from tagger.ui.preview.config import (
     SCROLLING_BEHAVIORS,
     SCROLL_NAVIGATE_AT_END,
@@ -88,6 +92,8 @@ class ImageView(QScrollArea):
         self.setWidget(self._label)
 
         self._pixmap: QPixmap | None = None
+        self._source_image: QImage | None = None
+        self._alpha_mode = "keep"
         self._fit_to_window = True
         self._scrolling_behavior = SCROLL_PAN
         self._zoom = 1.0
@@ -103,14 +109,35 @@ class ImageView(QScrollArea):
     def clear_image(self, message: str = "No image selected") -> None:
         self._end_drag()
         self._pixmap = None
+        self._source_image = None
         self._label.clear()
         self._label.setText(message)
         self._label.resize(self.viewport().size())
 
     def set_image(self, image: QImage) -> None:
-        self._pixmap = QPixmap.fromImage(image)
+        self._source_image = image
+        self._pixmap = QPixmap.fromImage(
+            apply_alpha_display_filter(image, self._alpha_mode)
+        )
         self._label.setText("")
         self._update_pixmap()
+
+    @property
+    def alpha_mode(self) -> str:
+        return self._alpha_mode
+
+    def set_alpha_mode(self, mode: str) -> None:
+        mode = mode.casefold()
+        if mode not in ALPHA_DISPLAY_FILTERS:
+            mode = "keep"
+        if self._alpha_mode == mode:
+            return
+        self._alpha_mode = mode
+        if self._source_image is not None:
+            self._pixmap = QPixmap.fromImage(
+                apply_alpha_display_filter(self._source_image, mode)
+            )
+            self._update_pixmap()
 
     def set_fit_to_window(self, enabled: bool) -> None:
         enabled = bool(enabled)

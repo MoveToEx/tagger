@@ -56,10 +56,13 @@ def test_selection_tree_cascades_and_threshold_has_stable_size(dialog, entries) 
     root = dialog.folder_tree.topLevelItem(0)
     assert root is not None
     assert dialog._checked_entries() == entries
+    folder = root.child(1)
+    assert folder is not None
+    assert folder.flags() & Qt.ItemFlag.ItemIsUserCheckable
+    assert folder.checkState(0) == Qt.CheckState.Checked
     root.setCheckState(0, Qt.CheckState.Unchecked)
     assert dialog._checked_entries() == []
     assert not dialog.scan_button.isEnabled()
-    folder = root.child(1)
     folder.setCheckState(0, Qt.CheckState.Checked)
     assert dialog._checked_entries() == entries[1:]
     assert root.checkState(0) == Qt.CheckState.PartiallyChecked

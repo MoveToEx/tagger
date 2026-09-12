@@ -4,13 +4,14 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon, QKeySequence
-from PySide6.QtWidgets import QSizePolicy, QToolBar, QToolButton, QWidget
+from PySide6.QtWidgets import QMenu, QSizePolicy, QToolBar, QToolButton, QWidget
 
 from tagger.ai_tagging.dependencies import (
     ai_dependencies_available,
     missing_ai_dependencies,
 )
 from tagger.domain.models import TagOperation
+from tagger.image_processing import ALPHA_DISPLAY_FILTERS
 from tagger.paths import PROJECT_ROOT
 from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.widgets import stabilize_checked_tool_button
@@ -28,6 +29,8 @@ class WindowActions:
 
     def __init__(self, window: MainWindow) -> None:
         self.window = window
+        self.alpha_menu = None
+        self.alpha_actions: dict[str, QAction] = {}
 
     def _create_actions(self) -> None:
         self.open_action = QAction(
@@ -98,6 +101,17 @@ class WindowActions:
 
         self.deduplicate_action = QAction("Deduplicate...", self.window)
         self.deduplicate_action.triggered.connect(self.window.dialogs._open_deduplicate)
+
+        self.transform_images_action = QAction("Transform Format...", self.window)
+        self.transform_images_action.triggered.connect(
+            self.window.dialogs._open_image_transform
+        )
+        self.remove_transparency_action = QAction(
+            "Remove Transparency...", self.window
+        )
+        self.remove_transparency_action.triggered.connect(
+            self.window.dialogs._open_remove_transparency
+        )
 
         self.settings_action = QAction("Settings...", self.window)
         self.settings_action.triggered.connect(self.window.dialogs._open_settings)
@@ -203,6 +217,7 @@ class WindowActions:
         file_menu.addAction(self.tidy_action)
         file_menu.addSeparator()
         file_menu.addAction(self.archive_action)
+        file_menu.addAction(self.transform_images_action)
         file_menu.addSeparator()
         file_menu.addAction(self.settings_action)
         file_menu.addSeparator()
@@ -220,6 +235,10 @@ class WindowActions:
         image_menu = self.window.menuBar().addMenu("&Image")
         image_menu.addAction(self.delete_filter_action)
         image_menu.addAction(self.deduplicate_action)
+        self._create_alpha_menu(image_menu)
+        image_menu.aboutToShow.connect(
+            lambda menu=image_menu: self._ensure_alpha_menu(menu)
+        )
         tags_menu = self.window.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
         tags_menu.addAction(self.review_action)
@@ -291,6 +310,10 @@ class WindowActions:
         self.global_search_action.setEnabled(count > 0)
         self.delete_filter_action.setEnabled(count > 0)
         self.deduplicate_action.setEnabled(count >= 2)
+        self.transform_images_action.setEnabled(count > 0)
+        self.remove_transparency_action.setEnabled(has_directory)
+        if self.alpha_menu is not None:
+            self.alpha_menu.setEnabled(has_current)
         self.review_action.setEnabled(count > 0 and any(entry.editable and entry.tags for entry in self.window.catalog.entries))
         self.complex_filter_action.setEnabled(count > 0)
         has_previous = (
@@ -319,3 +342,36 @@ class WindowActions:
             self.zoom_out_action,
         ]:
             action.setEnabled(has_current)
+
+    def _set_alpha_mode(self, mode: str) -> None:
+        self.window.image_view.set_alpha_mode(mode)
+        for name, action in self.alpha_actions.items():
+            action.setChecked(name == self.window.image_view.alpha_mode)
+
+    def _ensure_alpha_menu(self, image_menu) -> None:
+        if self.alpha_menu is not None:
+            if self.alpha_menu.menuAction() not in image_menu.actions():
+                image_menu.addSeparator()
+                image_menu.addAction(self.alpha_menu.menuAction())
+            return
+        self._create_alpha_menu(image_menu)
+
+    def _create_alpha_menu(self, image_menu) -> None:
+        if self.alpha_menu is not None:
+            return
+        self.alpha_menu = QMenu("Alpha", image_menu)
+        labels = {"keep": "Keep", "ignore": "Ignore", "exclusive": "Exclusive"}
+        for mode in ALPHA_DISPLAY_FILTERS:
+            labels.setdefault(mode, mode.replace("_", " ").title())
+        for mode, label in labels.items():
+            action = self.alpha_menu.addAction(label)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, selected_mode=mode: self._set_alpha_mode(
+                    selected_mode
+                )
+            )
+            self.alpha_actions[mode] = action
+        self.alpha_menu.addSeparator()
+        self.alpha_menu.addAction(self.remove_transparency_action)
+        self.alpha_actions["keep"].setChecked(True)

@@ -248,6 +248,7 @@ class DeduplicateDialog(QDialog):
                 if folder not in folders:
                     item = QTreeWidgetItem(parent, [folder.name])
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
+                    item.setCheckState(0, Qt.CheckState.Checked)
                     folders[folder] = item
                 parent = folders[folder]
             item = QTreeWidgetItem(parent, [relative.name])

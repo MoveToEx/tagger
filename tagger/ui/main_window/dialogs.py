@@ -25,6 +25,11 @@ from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
 from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
 from tagger.ui.dialogs.review import ReviewDialog
 from tagger.ui.dialogs.traversal import TraversalDialog
+from tagger.ui.dialogs.image_transform import ImageTransformDialog
+from tagger.ui.dialogs.transparency import (
+    TransparencyProgressDialog,
+    TransparencySelectionDialog,
+)
 
 
 if TYPE_CHECKING:
@@ -194,6 +199,66 @@ class DialogController:
             self.window.image_list.set_click_hold_behavior
         )
         dialog.exec()
+
+    def _open_image_transform(self) -> None:
+        if not self.window.catalog.entries:
+            return
+        current = self.window._current_entry()
+        dialog = ImageTransformDialog(
+            list(self.window.catalog.entries), self.window
+        )
+        if dialog.exec() == ImageTransformDialog.DialogCode.Accepted:
+            if self.window.directory is not None:
+                self.window.folders._load_directory(
+                    self.window.directory,
+                    preferred_image=current.image_path if current else None,
+                    show_issues=False,
+                )
+            if dialog.converted_paths:
+                self.window.statusBar().showMessage(
+                    f"Transformed {len(dialog.converted_paths)} image(s).", 4000
+                )
+
+    def _open_remove_transparency(
+        self, *, initial_paths: list[Path] | None = None
+    ) -> None:
+        if self.window.directory is None or not self.window.catalog.entries:
+            return
+        selection = TransparencySelectionDialog(
+            list(self.window.catalog.entries),
+            self.window,
+            root_directory=self.window.directory,
+            initial_paths=initial_paths,
+        )
+        if selection.exec() != TransparencySelectionDialog.DialogCode.Accepted:
+            return
+        paths = selection.selected_paths
+        dialog = TransparencyProgressDialog(paths, self.window)
+
+        def finished(result: tuple[list[Path], list[str]]) -> None:
+            changed, failures = result
+            if changed and self.window.directory is not None:
+                current = self.window._current_entry()
+                self.window.preview_loader.clear()
+                self.window.folders._load_directory(
+                    self.window.directory,
+                    preferred_image=current.image_path if current else None,
+                    show_issues=False,
+                )
+            if failures:
+                QMessageBox.warning(
+                    self.window,
+                    "Some Images Could Not Be Updated",
+                    "\n".join(failures),
+                )
+            elif changed:
+                self.window.statusBar().showMessage(
+                    f"Removed transparency from {len(changed)} image(s).", 4000
+                )
+
+        dialog.completed.connect(finished)
+        dialog.show()
+        dialog.start()
 
     def _open_ai_tagging(
         self, *, initial_image_path: Path | None = None
