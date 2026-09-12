@@ -246,6 +246,10 @@ class FileActions:
         )
         if current is not None:
             image_path = current.image_path
+            convert_action = send_to_menu.addAction("Convert...")
+            convert_action.triggered.connect(
+                lambda _checked=False: self.window.dialogs._open_image_transform()
+            )
             ai_tagging_action.triggered.connect(
                 lambda _checked=False: self.window.dialogs._open_ai_tagging(
                     initial_image_path=image_path
