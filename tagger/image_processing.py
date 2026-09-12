@@ -4,6 +4,7 @@ from collections.abc import Callable
 import os
 import tempfile
 from pathlib import Path
+from PIL import Image
 
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter
 
@@ -89,20 +90,21 @@ def convert_image(
     destination = source.with_suffix(f".{image_format}")
     if destination.exists() and not overwrite:
         raise FileExistsError(f"A file named {destination.name} already exists.")
-    reader = QImageReader(str(source))
-    reader.setAutoTransform(True)
-    image = reader.read()
-    if image.isNull():
-        raise OSError(reader.errorString() or f"Could not read {source.name}.")
-    del reader
-    if image_format in {"jpg", "jpeg"} and image.hasAlphaChannel():
-        flattened = QImage(image.size(), QImage.Format.Format_RGB32)
-        flattened.fill(QColor("white"))
-        painter = QPainter(flattened)
-        painter.drawImage(0, 0, image)
-        painter.end()
-        image = flattened
-    _save_image(image, destination, image_format.upper())
+    try:
+        with Image.open(source) as image:
+            if image_format in {"jpg", "jpeg"}:
+                if image.mode in {"RGBA", "LA", "P"}:
+                    background = Image.new("RGB", image.size, "white")
+                    if image.mode == "P":
+                        image = image.convert("RGBA")
+                    background.paste(image, mask=image.getchannel("A") if "A" in image.getbands() else None)
+                    image = background
+                else:
+                    image = image.convert("RGB")
+            image.save(destination, format={"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "webp": "WEBP"}[image_format])
+    except Exception as exc:
+        raise OSError(str(exc)) from exc
+    source.unlink()
     return destination
 
 

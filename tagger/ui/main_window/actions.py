@@ -102,7 +102,7 @@ class WindowActions:
         self.deduplicate_action = QAction("Deduplicate...", self.window)
         self.deduplicate_action.triggered.connect(self.window.dialogs._open_deduplicate)
 
-        self.transform_images_action = QAction("Transform Format...", self.window)
+        self.transform_images_action = QAction("Convert...", self.window)
         self.transform_images_action.triggered.connect(
             self.window.dialogs._open_image_transform
         )

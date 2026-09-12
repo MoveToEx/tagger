@@ -26,7 +26,7 @@ from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
 from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
 from tagger.ui.dialogs.review import ReviewDialog
 from tagger.ui.dialogs.traversal import TraversalDialog
-from tagger.ui.dialogs.image_transform import ImageTransformDialog
+from tagger.ui.dialogs.image_transform import ImageTransformDialog, ConvertProgressDialog
 from tagger.ui.dialogs.transparency import (
     TransparencyProgressDialog,
     TransparencySelectionDialog,
@@ -208,18 +208,26 @@ class DialogController:
             return
         current = self.window._current_entry()
         dialog = ImageTransformDialog(
-            list(self.window.catalog.entries), self.window
+            list(self.window.catalog.entries), self.window,
+            root_directory=self.window.directory,
         )
         if dialog.exec() == ImageTransformDialog.DialogCode.Accepted:
+            progress = ConvertProgressDialog(
+                dialog.selected_paths_for_conversion, dialog.target_format, self.window
+            )
+            result = []
+            progress.completed.connect(lambda value: result.append(value))
+            progress.start()
+            progress.exec()
             if self.window.directory is not None:
                 self.window.folders._load_directory(
                     self.window.directory,
                     preferred_image=current.image_path if current else None,
                     show_issues=False,
                 )
-            if dialog.converted_paths:
+            if result and result[0][0]:
                 self.window.statusBar().showMessage(
-                    f"Transformed {len(dialog.converted_paths)} image(s).", 4000
+                    f"Converted {len(result[0][0])} image(s).", 4000
                 )
 
     def _open_remove_transparency(
