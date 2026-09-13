@@ -5,6 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 from PIL import Image
+import numpy as np
 
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter
 
@@ -23,15 +24,30 @@ def _ignore_alpha(image: QImage) -> QImage:
 
 
 def _exclusive_alpha(image: QImage) -> QImage:
-    result = QImage(image.size(), QImage.Format.Format_RGB32)
-    result.fill(QColor("white"))
     if not image.hasAlphaChannel():
+        result = QImage(image.size(), QImage.Format.Format_RGB32)
+        result.fill(QColor("white"))
         return result
-    for y in range(image.height()):
-        for x in range(image.width()):
-            value = image.pixelColor(x, y).alpha()
-            result.setPixelColor(x, y, QColor(value, value, value))
-    return result
+
+    # Normalize the source layout once, then extract and replicate its alpha
+    # channel in bulk.  The previous Python-level pixel loop was several
+    # seconds for a single megapixel image.
+    source = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    pixels = np.frombuffer(source.bits(), dtype=np.uint8).reshape(
+        source.height(), source.bytesPerLine() // 4, 4
+    )[:, : source.width(), 3]
+    rgb = np.repeat(pixels[:, :, None], 3, axis=2)
+    rgba = np.empty((*rgb.shape[:2], 4), dtype=np.uint8)
+    rgba[:, :, :3] = rgb
+    rgba[:, :, 3] = 255
+    alpha_image = QImage(
+        rgba.data,
+        source.width(),
+        source.height(),
+        source.width() * 4,
+        QImage.Format.Format_RGBA8888,
+    ).copy()
+    return alpha_image.convertToFormat(QImage.Format.Format_RGB32)
 
 
 ALPHA_DISPLAY_FILTERS: dict[str, ImageFilter] = {
