@@ -47,7 +47,6 @@ def test_pointer_selects_polygon_interiors_in_stack_order_and_clears_on_empty_sp
     dialog.show()
     dialog._add_mask(((10, 10), (90, 10), (90, 70), (10, 70)))
     dialog._add_mask(((30, 20), (70, 20), (30, 60)))
-    dialog.save_button.click()
     dialog.pointer_button.click()
     assert dialog.pointer_button.isChecked()
     assert not dialog.rectangle_button.isChecked()
@@ -66,6 +65,8 @@ def test_pointer_selects_polygon_interiors_in_stack_order_and_clears_on_empty_sp
     assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == 0
     assert len(dialog.current_masks[0].points) == 4
     assert dialog.mask_list.count() == 2
+    assert dialog.isVisible()
+    assert not dialog.saved_paths
 
 
 @pytest.mark.parametrize("points", [
@@ -74,13 +75,13 @@ def test_pointer_selects_polygon_interiors_in_stack_order_and_clears_on_empty_sp
 ])
 def test_move_tool_translates_without_resizing_and_saves_preview(qtbot, tmp_path, points) -> None:
     path = _image(tmp_path / "a.png")
+    source_bytes = path.read_bytes()
     dialog = MaskEditorDialog([path])
     qtbot.addWidget(dialog)
     dialog.show()
     dialog.new_mask_alpha_input.setValue(0.5)
     dialog._add_mask(points)
     original = dialog.current_masks[0]
-    dialog.save_button.click()
     dialog.mask_list.setCurrentRow(-1)
     dialog.move_button.click()
     assert not dialog.move_button.icon().isNull()
@@ -93,7 +94,7 @@ def test_move_tool_translates_without_resizing_and_saves_preview(qtbot, tmp_path
     assert dialog.image_view.cursor().shape() == Qt.CursorShape.ClosedHandCursor
     qtbot.mouseMove(dialog.image_view, end)
     assert dialog.current_masks[0] == original
-    assert not dialog.dirty_paths
+    assert dialog.dirty_paths == {path}
     preview = dialog.image_view._drag_preview
     assert preview is not None
     assert preview.bounds == pytest.approx((35, 25, 75, 60), abs=0.25)
@@ -108,7 +109,11 @@ def test_move_tool_translates_without_resizing_and_saves_preview(qtbot, tmp_path
     assert moved.alpha == original.alpha
     assert moved.color == original.color
     assert dialog.image_view.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    assert path.read_bytes() == source_bytes
+    assert dialog.isVisible()
     dialog.save_button.click()
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert not dialog.isVisible()
     with Image.open(path) as result:
         assert result.getchannel("A").getpixel((55, 40)) == 128
         assert result.getchannel("A").getpixel((25, 25)) == 255
@@ -144,11 +149,11 @@ def test_move_can_be_cancelled_without_changing_mask(qtbot, tmp_path, cancel) ->
     dialog.show()
     dialog._add_mask(((20, 15), (60, 15), (60, 50), (20, 50)))
     original = dialog.current_masks[0]
-    dialog.save_button.click()
+    source_bytes = dialog.current_path.read_bytes()
     dialog.move_button.click()
     start, end = _mask_view_point(dialog, 40, 30), _mask_view_point(dialog, 55, 40)
     qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
-    assert not dialog.dirty_paths
+    assert dialog.dirty_paths == {dialog.current_path}
     qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
     qtbot.mouseMove(dialog.image_view, end)
     if cancel == "escape":
@@ -160,8 +165,10 @@ def test_move_can_be_cancelled_without_changing_mask(qtbot, tmp_path, cancel) ->
         dialog.previous_button.click()
     qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
     assert dialog.current_masks[0] == original
-    assert not dialog.dirty_paths
+    assert dialog.dirty_paths == {dialog.current_path}
     assert dialog.image_view._drag_preview is None
+    assert dialog.current_path.read_bytes() == source_bytes
+    assert dialog.isVisible()
 
 
 @pytest.mark.parametrize("start,end,bounds", [
@@ -181,14 +188,14 @@ def test_resize_polygon_from_each_bounding_box_handle(qtbot, tmp_path, start, en
     dialog.new_mask_alpha_input.setValue(0.4)
     dialog._add_mask(((20, 25), (40, 15), (60, 50), (30, 45)))
     original = dialog.current_masks[0]
-    dialog.save_button.click()
+    source_bytes = dialog.current_path.read_bytes()
     assert dialog.image_view.selected_mask == 0
     start_position = _mask_view_point(dialog, *start)
     end_position = _mask_view_point(dialog, *end)
     qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start_position)
     qtbot.mouseMove(dialog.image_view, end_position)
     assert dialog.current_masks == [original]
-    assert not dialog.dirty_paths
+    assert dialog.dirty_paths == {dialog.current_path}
     assert dialog.image_view._drag_preview is not None
     assert dialog.image_view._drag_preview.bounds == pytest.approx(bounds, abs=0.25)
     qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end_position)
@@ -200,6 +207,8 @@ def test_resize_polygon_from_each_bounding_box_handle(qtbot, tmp_path, start, en
     assert dialog.dirty_paths == {dialog.current_path}
     assert dialog.mask_list.count() == 1
     assert dialog.image_view.selected_mask == 0
+    assert dialog.current_path.read_bytes() == source_bytes
+    assert dialog.isVisible()
 
 
 def test_resize_rectangle_preview_and_saved_alpha_match(qtbot, tmp_path) -> None:
@@ -229,7 +238,7 @@ def test_resize_cancels_and_clamps_without_inverting_the_mask(qtbot, tmp_path) -
     dialog.show()
     dialog._add_mask(((20, 15), (60, 15), (60, 50), (20, 50)))
     original = dialog.current_masks[0]
-    dialog.save_button.click()
+    source_bytes = dialog.current_path.read_bytes()
     start = _mask_view_point(dialog, 20, 15)
     end = _mask_view_point(dialog, 80, 65)
     qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
@@ -239,18 +248,19 @@ def test_resize_cancels_and_clamps_without_inverting_the_mask(qtbot, tmp_path) -
     qtbot.keyClick(dialog.image_view, Qt.Key.Key_Escape)
     qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
     assert dialog.current_masks == [original]
-    assert not dialog.dirty_paths
+    assert dialog.dirty_paths == {dialog.current_path}
     assert dialog.isVisible()
     # A click without dragging is also a no-op.
     qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
     assert dialog.current_masks == [original]
-    assert not dialog.dirty_paths
+    assert dialog.dirty_paths == {dialog.current_path}
     qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
     qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=QPoint(1, 1))
     assert dialog.current_masks[0].bounds == (0, 0, 60, 50)
     qtbot.keyClick(dialog.image_view, Qt.Key.Key_Escape)
     assert dialog.mask_list.currentRow() == dialog.image_view.selected_mask == -1
     assert dialog.image_view._resize_handles() == {}
+    assert dialog.current_path.read_bytes() == source_bytes
 
 
 def test_resize_targets_selected_mask_after_reordering_and_navigation_cancels_drag(qtbot, tmp_path) -> None:
@@ -350,6 +360,8 @@ def test_draw_edit_hover_preview_and_save_across_images(qtbot, tmp_path) -> None
     dialog.save_button.click()
     assert dialog.saved_paths == [paths[0]]
     assert not dialog.dirty_paths
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert not dialog.isVisible()
     with Image.open(paths[0]) as result:
         assert result.getchannel("A").getpixel((25, 20)) == 128
         assert result.getchannel("A").getpixel((0, 0)) == 255
@@ -533,6 +545,7 @@ def test_failed_save_stays_dirty_and_can_be_retried(qtbot, tmp_path, monkeypatch
     path = _image(tmp_path / "a.png")
     dialog = MaskEditorDialog([path])
     qtbot.addWidget(dialog)
+    dialog.show()
     dialog._add_mask(((1, 1), (50, 1), (50, 40)))
     real_save = mask_editor_module.save_masks
 
@@ -546,9 +559,12 @@ def test_failed_save_stays_dirty_and_can_be_retried(qtbot, tmp_path, monkeypatch
     assert dialog.dirty_paths == {path}
     assert dialog.saved_paths == []
     assert "disk full" in warnings[0]
+    assert dialog.isVisible()
     monkeypatch.setattr(mask_editor_module, "save_masks", real_save)
     dialog.save_button.click()
     assert not dialog.dirty_paths
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert not dialog.isVisible()
 
 
 def test_menu_opens_picker_then_editor_and_refreshes_saved_images(qtbot, tmp_path, monkeypatch) -> None:
