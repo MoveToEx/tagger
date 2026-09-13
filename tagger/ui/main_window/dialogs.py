@@ -21,6 +21,7 @@ from tagger.settings.proxy import get_download_proxy
 from tagger.trash import UNLINK, delete_file
 from tagger.ui.dialogs.bulk_operation import BulkOperationDialog
 from tagger.ui.dialogs.complex_filter import ComplexFilterDialog
+from tagger.ui.dialogs.crop import CropDialog, CropSelectionDialog
 from tagger.ui.dialogs.deduplicate import DeduplicateDialog
 from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
 from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
@@ -230,6 +231,29 @@ class DialogController:
                 self.window.statusBar().showMessage(
                     f"Converted {len(result[0][0])} image(s).", 4000
                 )
+
+    def _open_crop(self) -> None:
+        if not self.window.catalog.entries:
+            return
+        selection = CropSelectionDialog(
+            list(self.window.catalog.entries), self.window,
+            root_directory=self.window.directory,
+        )
+        if selection.exec() != CropSelectionDialog.DialogCode.Accepted:
+            return
+        editor = CropDialog(selection.selected_paths, self.window)
+        editor.exec()
+        if editor.saved_paths and self.window.directory is not None:
+            current = self.window._current_entry()
+            self.window.preview_loader.clear()
+            self.window.folders._load_directory(
+                self.window.directory,
+                preferred_image=current.image_path if current else None,
+                show_issues=False,
+            )
+            self.window.statusBar().showMessage(
+                f"Cropped {len(editor.saved_paths)} image(s).", 4000,
+            )
 
     def _open_mask_editor(self, *, initial_paths: list[Path] | None = None) -> None:
         if not self.window.catalog.entries:

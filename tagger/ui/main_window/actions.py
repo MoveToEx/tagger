@@ -114,6 +114,8 @@ class WindowActions:
         )
         self.mask_editor_action = QAction("Mask Editor...", self.window)
         self.mask_editor_action.triggered.connect(self.window.dialogs._open_mask_editor)
+        self.crop_action = QAction("Crop...", self.window)
+        self.crop_action.triggered.connect(self.window.dialogs._open_crop)
 
         self.settings_action = QAction("Settings...", self.window)
         self.settings_action.triggered.connect(self.window.dialogs._open_settings)
@@ -240,6 +242,7 @@ class WindowActions:
         image_menu.addSeparator()
         image_menu.addAction(self.remove_transparency_action)
         image_menu.addAction(self.mask_editor_action)
+        image_menu.addAction(self.crop_action)
         tags_menu = self.window.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
         tags_menu.addAction(self.review_action)
@@ -317,6 +320,7 @@ class WindowActions:
         self.deduplicate_action.setEnabled(count >= 2)
         self.transform_images_action.setEnabled(count > 0)
         self.mask_editor_action.setEnabled(count > 0)
+        self.crop_action.setEnabled(count > 0)
         self.remove_transparency_action.setEnabled(has_directory)
         if self.alpha_menu is not None:
             self.alpha_menu.setEnabled(count > 0)
