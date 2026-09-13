@@ -232,12 +232,13 @@ class DialogController:
                     f"Converted {len(result[0][0])} image(s).", 4000
                 )
 
-    def _open_crop(self) -> None:
+    def _open_crop(self, *, initial_paths: list[Path] | None = None) -> None:
         if not self.window.catalog.entries:
             return
         selection = CropSelectionDialog(
             list(self.window.catalog.entries), self.window,
             root_directory=self.window.directory,
+            initial_paths=initial_paths,
         )
         if selection.exec() != CropSelectionDialog.DialogCode.Accepted:
             return

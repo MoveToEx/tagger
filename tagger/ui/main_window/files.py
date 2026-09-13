@@ -8,6 +8,7 @@ from PySide6.QtCore import QItemSelectionModel, QProcess, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMenu, QMessageBox
 
+from tagger.crop_storage import crop_disabled_reason
 from tagger.domain.models import ImageEntry
 from tagger.image_processing import image_has_alpha
 from tagger.mask_storage import mask_editing_disabled_reason
@@ -272,6 +273,16 @@ class FileActions:
                 mask_editor_action.setToolTip(disabled_reason)
             mask_editor_action.triggered.connect(
                 lambda _checked=False: self.window.dialogs._open_mask_editor(
+                    initial_paths=[image_path]
+                )
+            )
+            crop_action = send_to_menu.addAction("Crop...")
+            crop_reason = crop_disabled_reason(image_path)
+            crop_action.setEnabled(has_entry and crop_reason is None)
+            if crop_reason:
+                crop_action.setToolTip(crop_reason)
+            crop_action.triggered.connect(
+                lambda _checked=False: self.window.dialogs._open_crop(
                     initial_paths=[image_path]
                 )
             )

@@ -229,3 +229,55 @@ def test_menu_opens_picker_then_editor_and_refreshes_saved_images(qtbot, tmp_pat
     monkeypatch.setattr(window.folders, "_load_directory", lambda *args, **kwargs: calls.append("refresh"))
     action.trigger()
     assert calls == ["select", "edit", "clear", "refresh"]
+
+
+@pytest.mark.parametrize("accept_selection", [True, False])
+def test_catalog_send_to_crop_preselects_current_image(qtbot, tmp_path, monkeypatch, accept_selection) -> None:
+    paths = [_image(tmp_path / name) for name in ("a.png", "b.png")]
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    window._select_row(1)
+    selected_paths = []
+    edited_paths = []
+
+    def select(dialog):
+        qtbot.addWidget(dialog)
+        selected_paths.append(dialog.selected_paths)
+        return dialog.DialogCode.Accepted if accept_selection else dialog.DialogCode.Rejected
+
+    def edit(dialog):
+        qtbot.addWidget(dialog)
+        edited_paths.append(dialog.paths)
+        return dialog.DialogCode.Rejected
+
+    monkeypatch.setattr(CropSelectionDialog, "exec", select)
+    monkeypatch.setattr(CropDialog, "exec", edit)
+    menu = window.files._create_image_context_menu()
+    send_to = menu.actions()[-1].menu()
+    assert isinstance(send_to, QMenu)
+    action = next(action for action in send_to.actions() if action.text() == "Crop...")
+    assert action.isEnabled()
+    action.trigger()
+    assert selected_paths == [[paths[1]]]
+    assert edited_paths == ([[paths[1]]] if accept_selection else [])
+
+
+def test_catalog_crop_is_enabled_for_jpeg_and_disabled_for_animation(qtbot, tmp_path) -> None:
+    Image.new("RGB", (30, 20), "red").save(tmp_path / "a.jpg")
+    Image.new("RGB", (30, 20), "red").save(
+        tmp_path / "b.png", save_all=True,
+        append_images=[Image.new("RGB", (30, 20), "blue")],
+    )
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    for index, enabled in ((0, True), (1, False)):
+        window._select_row(index)
+        menu = window.files._create_image_context_menu()
+        send_to = menu.actions()[-1].menu()
+        assert isinstance(send_to, QMenu)
+        action = next(action for action in send_to.actions() if action.text() == "Crop...")
+        assert action.isEnabled() == enabled
+        if not enabled:
+            assert "single-frame" in action.toolTip()

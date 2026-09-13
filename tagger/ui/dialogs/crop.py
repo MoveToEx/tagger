@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton,
+    QLabel, QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton, QStyle,
     QVBoxLayout, QWidget,
 )
 
@@ -62,9 +62,11 @@ class CropSelectionDialog(TransparencySelectionDialog):
     def __init__(
         self, entries: list[ImageEntry], parent: QWidget | None = None,
         *, root_directory: Path | None = None,
+        initial_paths: list[Path] | None = None,
     ) -> None:
         super().__init__(
             entries, parent, root_directory=root_directory,
+            initial_paths=initial_paths,
             disabled_reason=crop_disabled_reason,
             title="Crop — Select Images", prompt="Select images to crop",
             action_text="Continue",
@@ -103,6 +105,18 @@ class CropDialog(QDialog):
         self.ratio_buttons: dict[str, QRadioButton] = {}
         for index, name in enumerate(ASPECT_RATIOS):
             button = QRadioButton(name)
+            indicator_width = button.style().pixelMetric(
+                QStyle.PixelMetric.PM_ExclusiveIndicatorWidth, None, button,
+            ) - 1
+            indicator_height = button.style().pixelMetric(
+                QStyle.PixelMetric.PM_ExclusiveIndicatorHeight, None, button,
+            ) - 1
+            button.setStyleSheet(
+                "QRadioButton::indicator { "
+                f"width: {indicator_width}px; height: {indicator_height}px; "
+                "}"
+            )
+            stabilize_widget_size(button)
             self.ratio_group.addButton(button)
             self.ratio_buttons[name] = button
             ratios_layout.addWidget(button, index // 2, index % 2)
