@@ -68,9 +68,9 @@ class WindowActions:
         self.rescan_action.setShortcut(QKeySequence("F5"))
         self.rescan_action.triggered.connect(self.window.folders.rescan)
 
-        self.tidy_action = QAction("Tidy", self.window)
+        self.tidy_action = QAction("Tidy...", self.window)
         self.tidy_action.setToolTip(
-            "Delete files not recognized as images or tag sidecars."
+            "Review and delete files not recognized as images or tag sidecars."
         )
         self.tidy_action.triggered.connect(self.window.files._tidy_folder)
 

@@ -25,6 +25,7 @@ from tagger.storage import (
 )
 from tagger.trash import UNLINK, delete_file
 from tagger.ui.dialogs.archive import ArchiveDialog, ArchiveProgressDialog
+from tagger.ui.dialogs.tidy import TidyDialog
 
 
 if TYPE_CHECKING:
@@ -62,27 +63,10 @@ class FileActions:
             self.window.settings, USE_UNLINK_FOR_TIDY_SETTING
         )
         deleting_permanently = deletion_behavior == UNLINK
-        count = len(candidates)
-        answer = QMessageBox.question(
-            self.window,
-            (
-                "Permanently Delete Unrecognized Files?"
-                if deleting_permanently
-                else "Delete Unrecognized Files?"
-            ),
-            (
-                f"Permanently delete {count} unrecognized file(s)?\n\n"
-                "This cannot be undone."
-                if deleting_permanently
-                else (
-                    f"Move {count} unrecognized file(s) to the system "
-                    "Recycle Bin?"
-                )
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+        dialog = TidyDialog(
+            directory, candidates, deletion_behavior, self.window
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if dialog.exec() != TidyDialog.DialogCode.Accepted:
             return
 
         deleted: list[Path] = []

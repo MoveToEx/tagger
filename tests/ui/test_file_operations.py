@@ -4,6 +4,7 @@ from pathlib import Path
 import threading
 import zipfile
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox
 
@@ -14,6 +15,7 @@ from tagger.settings.preferences import (
 from tagger.ai_tagging.dialog import AITaggingDialog
 from tagger.storage import ArchiveResult
 from tagger.trash import SYSTEM_RECYCLE_BIN, UNLINK
+from tagger.ui.dialogs.tidy import TidyDialog
 import tagger.trash as trash_module
 import tagger.ui.dialogs.archive as archive_module
 import tagger.ui.main_window.dialogs as window_dialogs
@@ -29,9 +31,13 @@ def test_file_menu_tidy_deletes_unrecognized_files(
     image_path = tmp_path / "sample.png"
     tag_path = tmp_path / "sample.txt"
     unknown = tmp_path / "notes.json"
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    nested_unknown = nested / "notes.json"
     create_png(image_path)
     tag_path.write_text("cat\n", encoding="utf-8")
     unknown.write_text("{}", encoding="utf-8")
+    nested_unknown.write_text("{}", encoding="utf-8")
     window = MainWindow()
     qtbot.addWidget(window)
 
@@ -44,15 +50,27 @@ def test_file_menu_tidy_deletes_unrecognized_files(
     )
     assert window.commands.tidy_action in file_menu.actions()
 
-    prompts: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda _parent, title, message, *_args: (
-            prompts.append((title, message))
-            or QMessageBox.StandardButton.Yes
-        ),
-    )
+    def confirm_dialog(dialog: TidyDialog) -> int:
+        dialog.show()
+        assert unknown.exists()
+        assert nested_unknown.exists()
+        assert dialog.file_list.count() == 2
+        assert {
+            dialog.file_list.item(row).text()
+            for row in range(dialog.file_list.count())
+        } == {"notes.json", str(Path("nested") / "notes.json")}
+        assert {
+            dialog.file_list.item(row).toolTip()
+            for row in range(dialog.file_list.count())
+        } == {str(unknown), str(nested_unknown)}
+        assert "2 unrecognized file(s)" in dialog.summary_label.text()
+        assert "Recycle Bin" in dialog.summary_label.text()
+        assert dialog.cancel_button.isDefault()
+        assert dialog.delete_button.text() == "Move to Recycle Bin"
+        qtbot.mouseClick(dialog.delete_button, Qt.MouseButton.LeftButton)
+        return dialog.result()
+
+    monkeypatch.setattr(TidyDialog, "exec", confirm_dialog)
     monkeypatch.setattr(
         window_files,
         "delete_file",
@@ -62,10 +80,9 @@ def test_file_menu_tidy_deletes_unrecognized_files(
     window.commands.tidy_action.trigger()
 
     assert not unknown.exists()
+    assert not nested_unknown.exists()
     assert image_path.exists()
     assert tag_path.exists()
-    assert prompts[0][0] == "Delete Unrecognized Files?"
-    assert "1 unrecognized file(s)" in prompts[0][1]
 
 
 def test_tidy_uses_unlink_setting(
@@ -86,11 +103,16 @@ def test_tidy_uses_unlink_setting(
         return True
 
     monkeypatch.setattr(window_files, "delete_file", fake_delete_file)
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *_args: QMessageBox.StandardButton.Yes,
-    )
+
+    def confirm_dialog(dialog: TidyDialog) -> int:
+        dialog.show()
+        assert "Permanently delete 1" in dialog.summary_label.text()
+        assert "This cannot be undone." in dialog.summary_label.text()
+        assert dialog.delete_button.text() == "Permanently Delete"
+        qtbot.mouseClick(dialog.delete_button, Qt.MouseButton.LeftButton)
+        return dialog.result()
+
+    monkeypatch.setattr(TidyDialog, "exec", confirm_dialog)
 
     window.files._tidy_folder()
 
@@ -99,6 +121,42 @@ def test_tidy_uses_unlink_setting(
     assert window.statusBar().currentMessage() == (
         "Permanently deleted 1 unrecognized file(s)."
     )
+
+
+@pytest.mark.parametrize("dismissal", ["cancel", "escape", "close", "enter"])
+def test_tidy_dialog_can_be_cancelled(
+    qtbot, tmp_path: Path, monkeypatch, dismissal: str
+) -> None:
+    create_png(tmp_path / "sample.png")
+    unknown = tmp_path / "notes.json"
+    unknown.write_text("{}", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    deleted: list[Path] = []
+    monkeypatch.setattr(
+        window_files, "delete_file", lambda path, _behavior: deleted.append(path)
+    )
+
+    def dismiss_dialog(dialog: TidyDialog) -> int:
+        dialog.show()
+        if dismissal == "cancel":
+            qtbot.mouseClick(dialog.cancel_button, Qt.MouseButton.LeftButton)
+        elif dismissal == "escape":
+            qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+        elif dismissal == "enter":
+            qtbot.keyClick(dialog, Qt.Key.Key_Return)
+        else:
+            dialog.close()
+        assert not dialog.isVisible()
+        return dialog.result()
+
+    monkeypatch.setattr(TidyDialog, "exec", dismiss_dialog)
+
+    window.commands.tidy_action.trigger()
+
+    assert deleted == []
+    assert unknown.exists()
 
 
 def test_archive_action_compresses_open_folder_without_hierarchy(
