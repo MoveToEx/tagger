@@ -49,10 +49,11 @@ def test_view_alpha_modes_and_image_editing_action_group(qtbot, tmp_path: Path) 
     actions = alpha_menu.actions()
     assert actions == list(window.commands.alpha_actions.values())
     image_actions = image_menu.actions()
-    assert image_actions[-4].isSeparator()
-    assert image_actions[-3:] == [
+    assert image_actions[-5].isSeparator()
+    assert image_actions[-4] == window.commands.crop_action
+    assert image_actions[-3].isSeparator()
+    assert image_actions[-2:] == [
         window.commands.remove_transparency_action, window.commands.mask_editor_action,
-        window.commands.crop_action,
     ]
     assert not alpha_menu.isEnabled()
     create_png(tmp_path / "sample.png")
