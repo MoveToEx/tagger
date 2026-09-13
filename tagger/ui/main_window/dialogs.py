@@ -29,6 +29,7 @@ from tagger.ui.dialogs.mask_editor import MaskEditorDialog, MaskSelectionDialog
 from tagger.ui.dialogs.review import ReviewDialog
 from tagger.ui.dialogs.traversal import TraversalDialog
 from tagger.ui.dialogs.image_transform import ImageTransformDialog, ConvertProgressDialog
+from tagger.ui.dialogs.pixel_transform import PixelTransformDialog
 from tagger.ui.dialogs.transparency import (
     TransparencyProgressDialog,
     TransparencySelectionDialog,
@@ -231,6 +232,15 @@ class DialogController:
                 self.window.statusBar().showMessage(
                     f"Converted {len(result[0][0])} image(s).", 4000
                 )
+
+    def _open_pixel_transform(self) -> None:
+        if not self.window.catalog.entries:
+            return
+        current = self.window._current_entry()
+        dialog = PixelTransformDialog(list(self.window.catalog.entries), self.window, root_directory=self.window.directory)
+        if dialog.exec() == PixelTransformDialog.DialogCode.Accepted and self.window.directory is not None:
+            self.window.preview_loader.clear()
+            self.window.folders._load_directory(self.window.directory, preferred_image=current.image_path if current else None, show_issues=False)
 
     def _open_crop(self, *, initial_paths: list[Path] | None = None) -> None:
         if not self.window.catalog.entries:

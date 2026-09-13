@@ -106,6 +106,8 @@ class WindowActions:
         self.transform_images_action.triggered.connect(
             self.window.dialogs._open_image_transform
         )
+        self.pixel_transform_action = QAction("Pixel Transform...", self.window)
+        self.pixel_transform_action.triggered.connect(self.window.dialogs._open_pixel_transform)
         self.remove_transparency_action = QAction(
             "Remove Transparency...", self.window
         )
@@ -239,6 +241,7 @@ class WindowActions:
         image_menu = self.window.menuBar().addMenu("&Image")
         image_menu.addAction(self.delete_filter_action)
         image_menu.addAction(self.deduplicate_action)
+        image_menu.addAction(self.pixel_transform_action)
         image_menu.addSeparator()
         image_menu.addAction(self.crop_action)
         image_menu.addSeparator()
