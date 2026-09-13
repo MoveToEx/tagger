@@ -356,7 +356,7 @@ def test_draw_edit_hover_preview_and_save_across_images(qtbot, tmp_path) -> None
     assert paths[1].read_bytes() == originals[1]
 
 
-def test_base_alpha_is_per_image_and_saves_without_polygons(qtbot, tmp_path) -> None:
+def test_base_alpha_persists_between_images_and_saves_without_polygons(qtbot, tmp_path) -> None:
     paths = [_image(tmp_path / name) for name in ("a.png", "b.png")]
     dialog = MaskEditorDialog(paths)
     qtbot.addWidget(dialog)
@@ -369,7 +369,7 @@ def test_base_alpha_is_per_image_and_saves_without_polygons(qtbot, tmp_path) -> 
     qtbot.waitUntil(lambda: not dialog.image_view._alpha_pixmap.isNull())
     assert dialog.image_view._alpha_pixmap.toImage().pixelColor(0, 0).alpha() == 64
     dialog.next_button.click()
-    assert dialog.base_alpha_input.value() == 1.0
+    assert dialog.base_alpha_input.value() == 0.25
     assert dialog.dirty_paths == {paths[0]}
     dialog.previous_button.click()
     assert dialog.base_alpha_input.value() == 0.25

@@ -66,6 +66,7 @@ class MaskImageView(QWidget):
     polygon_created = Signal(object)
     mask_transformed = Signal(int, object)
     mask_selected = Signal(int)
+    navigation_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -349,6 +350,14 @@ class MaskImageView(QWidget):
 
     @override
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.BackButton:
+            self.navigation_requested.emit(-1)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.ForwardButton:
+            self.navigation_requested.emit(1)
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.RightButton:
             self.finish_polygon()
             return
@@ -455,6 +464,10 @@ class MaskImageView(QWidget):
         elif event.key() == Qt.Key.Key_Backspace and self._points:
             self._points.pop()
             self.update()
+        elif event.key() == Qt.Key.Key_Left:
+            self.navigation_requested.emit(-1)
+        elif event.key() == Qt.Key.Key_Right:
+            self.navigation_requested.emit(1)
         else:
             super().keyPressEvent(event)
 
@@ -561,12 +574,17 @@ class MaskEditorDialog(QDialog):
         self.current_index = 0
         self.masks_by_path: dict[Path, list[MaskRegion]] = {path: [] for path in paths}
         self.base_alpha_by_path: dict[Path, float] = {path: 1.0 for path in paths}
+        # Base alpha is a session setting: once the user changes it, retain
+        # that value while moving between images.  Each image still keeps a
+        # stored value for saving, but newly visited images inherit this one.
+        self._base_alpha = 1.0
         self.dirty_paths: set[Path] = set()
         self.saved_paths: list[Path] = []
         self._hue = random.random()
         self.image_view = MaskImageView()
         self.image_view.polygon_created.connect(self._add_mask)
         self.image_view.mask_transformed.connect(self._transform_mask)
+        self.image_view.navigation_requested.connect(self._navigate)
         self.image_label = QLabel()
         self.image_label.setTextFormat(Qt.TextFormat.PlainText)
         self.image_label.setContentsMargins(12, 4, 12, 4)
@@ -694,7 +712,10 @@ class MaskEditorDialog(QDialog):
             image = None
             self.image_label.setText(f"Could not load {self.current_path.name}: {exc}")
         self.image_view.set_image(image, self.current_masks)
-        base_alpha = self.base_alpha_by_path[self.current_path]
+        # Carry the current setting across image navigation instead of
+        # resetting to a per-image default.
+        base_alpha = self._base_alpha
+        self.base_alpha_by_path[self.current_path] = base_alpha
         self.base_alpha_input.blockSignals(True)
         self.base_alpha_input.setValue(base_alpha)
         self.base_alpha_input.blockSignals(False)
@@ -710,6 +731,18 @@ class MaskEditorDialog(QDialog):
             self.current_index = index
             self._load_current()
 
+    @override
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Left:
+            self._navigate(-1)
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Right:
+            self._navigate(1)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def _add_mask(self, points: tuple[tuple[float, float], ...]) -> None:
         # Spread consecutive hues around the wheel, with a random starting color.
         self._hue = (self._hue + 0.61803398875) % 1.0
@@ -722,6 +755,7 @@ class MaskEditorDialog(QDialog):
         self.mask_list.setCurrentRow(0)
 
     def _set_base_alpha(self, alpha: float) -> None:
+        self._base_alpha = alpha
         self.base_alpha_by_path[self.current_path] = alpha
         self.image_view.set_base_alpha(alpha)
         self._changed()
