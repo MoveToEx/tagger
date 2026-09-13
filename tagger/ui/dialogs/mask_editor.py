@@ -13,8 +13,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QDoubleSpinBox, QHBoxLayout,
-    QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QToolButton,
-    QVBoxLayout, QWidget,
+    QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressDialog,
+    QPushButton, QToolButton, QVBoxLayout, QWidget,
 )
 
 from tagger.domain.masks import MaskRegion
@@ -667,8 +667,9 @@ class MaskEditorDialog(QDialog):
         self.next_button = QPushButton("Next")
         self.previous_button.clicked.connect(lambda: self._navigate(-1))
         self.next_button.clicked.connect(lambda: self._navigate(1))
-        self.save_button = QPushButton("Save Changes")
-        self.save_button.clicked.connect(self._save_changes)
+        self.save_button = QPushButton("Finish")
+        self.save_button.setAccessibleName("Finish")
+        self.save_button.clicked.connect(self._finish)
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.reject)
         buttons = QHBoxLayout()
@@ -818,9 +819,27 @@ class MaskEditorDialog(QDialog):
 
     def _save_changes(self) -> None:
         failures: list[str] = []
-        for path in self.paths:
-            if path not in self.dirty_paths:
-                continue
+        dirty = [path for path in self.paths if path in self.dirty_paths]
+        progress = QProgressDialog("", "Cancel", 0, len(dirty), self)
+        progress.setWindowTitle("Saving Masks")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        # Match the wider progress dialogs used by other batch operations;
+        # the label above the bar is updated with the file currently written.
+        progress.setFixedWidth(640)
+        label = progress.findChild(QLabel)
+        if label is not None:
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+        progress.setAutoClose(True)
+        progress.setValue(0)
+        progress.show()
+        QApplication.processEvents()
+        for index, path in enumerate(dirty, 1):
+            if progress.wasCanceled():
+                break
+            progress.setLabelText(path.name)
+            QApplication.processEvents()
             try:
                 save_masks(path, self.masks_by_path[path], self.base_alpha_by_path[path])
             except (OSError, ValueError) as exc:
@@ -829,6 +848,9 @@ class MaskEditorDialog(QDialog):
             self.dirty_paths.remove(path)
             if path not in self.saved_paths:
                 self.saved_paths.append(path)
+            progress.setValue(index)
+            QApplication.processEvents()
+        progress.close()
         self._update_save_button()
         if failures:
             QMessageBox.warning(self, "Some Masks Could Not Be Saved", "\n".join(failures))
@@ -854,3 +876,8 @@ class MaskEditorDialog(QDialog):
                 if self.dirty_paths:
                     return
         super().reject()
+
+    def _finish(self) -> None:
+        self._save_changes()
+        if not self.dirty_paths:
+            self.accept()
