@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 import random
-from typing import cast, override
+import threading
+from typing import Callable, cast, override
 
 from PIL import Image, ImageQt
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QEvent, QObject, QPointF, QRectF, QSize, QThread, QTimer, Qt, Signal, Slot,
+)
 from PySide6.QtGui import (
-    QBrush, QColor, QEnterEvent, QIcon, QKeyEvent, QMouseEvent, QPaintEvent,
-    QPainter, QPen, QPixmap, QPolygonF,
+    QBrush, QCloseEvent, QColor, QEnterEvent, QIcon, QKeyEvent, QMouseEvent,
+    QPaintEvent, QPainter, QPen, QPixmap, QPolygonF,
 )
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QDoubleSpinBox, QHBoxLayout,
-    QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressDialog,
+    QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressBar,
     QPushButton, QToolButton, QVBoxLayout, QWidget, QSlider, QComboBox,
     QDialogButtonBox, QFormLayout, QMenu,
 )
@@ -26,6 +29,148 @@ from tagger.mask_storage import (
 from tagger.paths import PROJECT_ROOT
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
 from tagger.ui.widgets import stabilize_checked_tool_button, stabilize_widget_size
+
+
+@dataclass
+class MaskSaveResult:
+    saved_paths: list[Path]
+    failures: dict[Path, str]
+    canceled: bool
+
+
+class _MaskSaveWorker(QObject):
+    progress = Signal(int, int, str)
+    completed = Signal(object)
+
+    def __init__(
+        self,
+        tasks: list[tuple[Path, tuple[MaskRegion, ...], float]],
+        saver: Callable[[Path, tuple[MaskRegion, ...], float], None],
+    ) -> None:
+        super().__init__()
+        self._tasks = tasks
+        self._saver = saver
+        self._cancelled = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    @Slot()
+    def run(self) -> None:
+        saved: list[Path] = []
+        failures: dict[Path, str] = {}
+        total = len(self._tasks)
+        for number, (path, masks, base_alpha) in enumerate(self._tasks, 1):
+            if self._cancelled.is_set():
+                break
+            self.progress.emit(number - 1, total, path.name)
+            try:
+                self._saver(path, masks, base_alpha)
+            except Exception as exc:
+                failures[path] = str(exc)
+            else:
+                saved.append(path)
+            self.progress.emit(number, total, path.name)
+        self.completed.emit(
+            MaskSaveResult(saved, failures, self._cancelled.is_set())
+        )
+
+
+class MaskSaveProgressDialog(QDialog):
+    def __init__(
+        self,
+        tasks: list[tuple[Path, tuple[MaskRegion, ...], float]],
+        saver: Callable[[Path, tuple[MaskRegion, ...], float], None],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Saving Masks")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setFixedWidth(640)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+
+        self.current_file_label = QLabel("Preparing images...")
+        self.current_file_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, len(tasks))
+        self.progress_bar.setValue(0)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self._cancel)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        button_layout.addWidget(self.cancel_button)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.current_file_label)
+        layout.addWidget(self.progress_bar)
+        layout.addLayout(button_layout)
+
+        self.save_result: MaskSaveResult | None = None
+        self._running = False
+        thread = QThread(self)
+        worker = _MaskSaveWorker(tasks, saver)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._update_progress)
+        worker.completed.connect(self._worker_completed)
+        worker.completed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._thread_finished)
+        self._thread: QThread | None = thread
+        self._worker: _MaskSaveWorker | None = worker
+
+    def start(self) -> None:
+        if self._running or self._thread is None:
+            return
+        self._running = True
+        self._thread.start(QThread.Priority.LowPriority)
+
+    def _update_progress(
+        self, completed: int, total: int, current_file: str
+    ) -> None:
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(completed)
+        self.current_file_label.setText(current_file)
+
+    def _cancel(self) -> None:
+        if not self._running or self._worker is None:
+            return
+        self._worker.cancel()
+        self.cancel_button.setEnabled(False)
+        self.current_file_label.setText("Canceling after the current image...")
+
+    def _worker_completed(self, result: MaskSaveResult) -> None:
+        self.save_result = result
+
+    def _thread_finished(self) -> None:
+        self._running = False
+        QTimer.singleShot(0, self._close_after_thread)
+
+    def _close_after_thread(self) -> None:
+        self._thread = None
+        self._worker = None
+        if self.save_result is not None and not self.save_result.canceled:
+            self.progress_bar.setValue(self.progress_bar.maximum())
+            self.accept()
+        else:
+            self.reject()
+
+    @override
+    def reject(self) -> None:
+        if self._running:
+            self._cancel()
+            return
+        super().reject()
+
+    @override
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._running:
+            self._cancel()
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 class MaskSelectionDialog(TransparencySelectionDialog):
@@ -973,43 +1118,38 @@ class MaskEditorDialog(QDialog):
         self.delete_button.setEnabled(False)
 
     def _save_changes(self) -> None:
-        failures: list[str] = []
         dirty = [path for path in self.paths if path in self.dirty_paths]
-        progress = QProgressDialog("", "Cancel", 0, len(dirty), self)
-        progress.setWindowTitle("Saving Masks")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        # Match the wider progress dialogs used by other batch operations;
-        # the label above the bar is updated with the file currently written.
-        progress.setFixedWidth(640)
-        label = progress.findChild(QLabel)
-        if label is not None:
-            label.setAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        if not dirty:
+            return
+        tasks = [
+            (
+                path,
+                tuple(self.masks_by_path[path]),
+                self.base_alpha_by_path[path],
             )
-        progress.setAutoClose(True)
-        progress.setValue(0)
-        progress.show()
-        QApplication.processEvents()
-        for index, path in enumerate(dirty, 1):
-            if progress.wasCanceled():
-                break
-            progress.setLabelText(path.name)
-            QApplication.processEvents()
-            try:
-                save_masks(path, self.masks_by_path[path], self.base_alpha_by_path[path])
-            except (OSError, ValueError) as exc:
-                failures.append(f"{path.name}: {exc}")
-                continue
+            for path in dirty
+        ]
+        progress = MaskSaveProgressDialog(tasks, save_masks, self)
+        progress.start()
+        progress.exec()
+        if progress.save_result is None:
+            return
+        result = progress.save_result
+        for path in result.saved_paths:
             self.dirty_paths.remove(path)
             if path not in self.saved_paths:
                 self.saved_paths.append(path)
-            progress.setValue(index)
-            QApplication.processEvents()
-        progress.close()
         self._update_save_button()
-        if failures:
-            QMessageBox.warning(self, "Some Masks Could Not Be Saved", "\n".join(failures))
-        else:
+        if result.failures:
+            QMessageBox.warning(
+                self,
+                "Some Masks Could Not Be Saved",
+                "\n".join(
+                    f"{path.name}: {message}"
+                    for path, message in result.failures.items()
+                ),
+            )
+        elif not result.canceled:
             self.image_label.setText(
                 f"{self.current_index + 1} / {len(self.paths)} — "
                 f"{self.current_path.name} — Saved changes"

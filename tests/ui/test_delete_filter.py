@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 import threading
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QTimer, Qt
 from PySide6.QtWidgets import QGroupBox, QLabel, QMenu, QMessageBox
 
 from tagger.domain.models import ImageEntry
@@ -281,8 +281,10 @@ def test_delete_filter_progress_dialog_updates_while_deleting(
     tag_path.write_text("cat\n", encoding="utf-8")
     entry = ImageEntry(image_path, tag_path, ["cat"], b"cat\n")
     release_worker = threading.Event()
+    worker_threads: list[int] = []
 
     def fake_move_to_trash(path: Path) -> bool:
+        worker_threads.append(threading.get_ident())
         if path == image_path:
             release_worker.wait(timeout=5)
         path.unlink()
@@ -292,6 +294,11 @@ def test_delete_filter_progress_dialog_updates_while_deleting(
         [entry], fake_move_to_trash, lambda: True
     )
     qtbot.addWidget(dialog)
+    gui_ticks: list[None] = []
+    timer = QTimer(dialog)
+    timer.setInterval(10)
+    timer.timeout.connect(lambda: gui_ticks.append(None))
+    timer.start()
     dialog.show()
     dialog.start()
     try:
@@ -302,6 +309,9 @@ def test_delete_filter_progress_dialog_updates_while_deleting(
         assert dialog.isVisible()
         assert dialog.progress_bar.value() == 0
         assert dialog.progress_bar.maximum() == 2
+        qtbot.waitUntil(lambda: len(gui_ticks) >= 3, timeout=3000)
+        assert len(worker_threads) == 1
+        assert worker_threads[0] != threading.get_ident()
         dialog.reject()
         assert dialog.isVisible()
     finally:

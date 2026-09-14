@@ -184,7 +184,7 @@ class DeleteFilterProgressDialog(QDialog):
         if self._thread is None:
             return
         self._running = True
-        self._thread.start()
+        self._thread.start(QThread.Priority.LowPriority)
 
     def _update_progress(
         self, completed: int, total: int, current_file: str

@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 from PIL import Image
 import pytest
-from PySide6.QtCore import QEvent, QModelIndex, QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QModelIndex, QPoint, QPointF, QTimer, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
 from tagger.domain.models import ImageEntry
-from tagger.ui.dialogs.mask_editor import MaskEditorDialog, MaskList, MaskRow, MaskSelectionDialog
+from tagger.ui.dialogs.mask_editor import (
+    MaskEditorDialog,
+    MaskList,
+    MaskRow,
+    MaskSaveProgressDialog,
+    MaskSelectionDialog,
+)
 import tagger.ui.dialogs.mask_editor as mask_editor_module
 import tagger.ui.main_window.dialogs as dialogs_module
 from tagger.ui.main_window.window import MainWindow
@@ -565,6 +572,49 @@ def test_failed_save_stays_dirty_and_can_be_retried(qtbot, tmp_path, monkeypatch
     assert not dialog.dirty_paths
     assert dialog.result() == dialog.DialogCode.Accepted
     assert not dialog.isVisible()
+
+
+def test_mask_save_progress_keeps_gui_events_responsive(
+    qtbot, tmp_path: Path
+) -> None:
+    path = _image(tmp_path / "a.png")
+    started = threading.Event()
+    release_worker = threading.Event()
+    worker_threads: list[int] = []
+
+    def slow_save(
+        _path: Path, _masks: tuple, _base_alpha: float
+    ) -> None:
+        worker_threads.append(threading.get_ident())
+        started.set()
+        assert release_worker.wait(timeout=5)
+
+    dialog = MaskSaveProgressDialog([(path, (), 1.0)], slow_save)
+    qtbot.addWidget(dialog)
+    gui_ticks: list[None] = []
+    timer = QTimer(dialog)
+    timer.setInterval(10)
+    timer.timeout.connect(lambda: gui_ticks.append(None))
+    timer.start()
+    dialog.show()
+    dialog.start()
+    try:
+        qtbot.waitUntil(started.is_set, timeout=3000)
+        qtbot.waitUntil(lambda: len(gui_ticks) >= 3, timeout=3000)
+        assert dialog.current_file_label.text() == path.name
+        assert dialog.progress_bar.value() == 0
+        assert len(worker_threads) == 1
+        assert worker_threads[0] != threading.get_ident()
+    finally:
+        release_worker.set()
+
+    qtbot.waitUntil(lambda: not dialog._running, timeout=3000)
+    qtbot.waitUntil(lambda: dialog.save_result is not None, timeout=3000)
+    assert dialog.save_result is not None
+    assert dialog.save_result.saved_paths == [path]
+    assert dialog.save_result.failures == {}
+    assert not dialog.save_result.canceled
+    assert dialog.progress_bar.value() == 1
 
 
 def test_menu_opens_picker_then_editor_and_refreshes_saved_images(qtbot, tmp_path, monkeypatch) -> None:
