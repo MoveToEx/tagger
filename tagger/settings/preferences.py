@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from tagger.preprocess import (
+    DEFAULT_ARB_ENABLED,
+    DEFAULT_ARB_MAX_SIZE,
+    DEFAULT_ARB_MIN_SIZE,
+    DEFAULT_ARB_STEP,
+    DEFAULT_NO_UPSCALE,
+    DEFAULT_TRAINING_RESOLUTION,
+    DEFAULT_GRID_TYPE,
+    GRID_TYPES,
+    PreprocessOptions,
+)
 from tagger.settings.store import JsonSettings
 from tagger.trash import SYSTEM_RECYCLE_BIN, UNLINK
 from tagger.ui.preview.config import (
@@ -25,6 +36,15 @@ USE_UNLINK_FOR_DEDUPLICATE_SETTING = "general/use_unlink_for_deduplicate"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 SCRIPTING_TAGS_TYPE_SETTING = "scripting/tags_type"
+SIMULATOR_TRAINING_RESOLUTION_SETTING = (
+    "simulator/preprocess/training_resolution"
+)
+SIMULATOR_ARB_ENABLED_SETTING = "simulator/preprocess/arb_enabled"
+SIMULATOR_ARB_STEP_SETTING = "simulator/preprocess/arb_step"
+SIMULATOR_ARB_MIN_SIZE_SETTING = "simulator/preprocess/arb_min_size"
+SIMULATOR_ARB_MAX_SIZE_SETTING = "simulator/preprocess/arb_max_size"
+SIMULATOR_NO_UPSCALE_SETTING = "simulator/preprocess/no_upscale"
+SIMULATOR_GRID_TYPE_SETTING = "simulator/grid_type"
 NO_PROXY = "none"
 SYSTEM_PROXY = "system"
 CUSTOM_PROXY = "custom"
@@ -77,6 +97,59 @@ def get_image_prefetch_count(settings: JsonSettings) -> int:
     if not isinstance(count, int):
         return DEFAULT_IMAGE_PREFETCH_COUNT
     return max(0, min(MAX_IMAGE_PREFETCH_COUNT, count))
+
+
+def get_preprocess_options(settings: JsonSettings) -> PreprocessOptions:
+    def integer_value(
+        key: str, default: int, minimum: int, maximum: int
+    ) -> int:
+        value = settings.value(key, default, type=int)
+        if not isinstance(value, int):
+            return default
+        return max(minimum, min(maximum, value))
+
+    minimum = integer_value(
+        SIMULATOR_ARB_MIN_SIZE_SETTING, DEFAULT_ARB_MIN_SIZE, 64, 8192
+    )
+    maximum = integer_value(
+        SIMULATOR_ARB_MAX_SIZE_SETTING, DEFAULT_ARB_MAX_SIZE, 64, 8192
+    )
+    if minimum > maximum:
+        minimum, maximum = maximum, minimum
+    arb_enabled = settings.value(
+        SIMULATOR_ARB_ENABLED_SETTING, DEFAULT_ARB_ENABLED, type=bool
+    )
+    no_upscale = settings.value(
+        SIMULATOR_NO_UPSCALE_SETTING, DEFAULT_NO_UPSCALE, type=bool
+    )
+    return PreprocessOptions(
+        training_resolution=integer_value(
+            SIMULATOR_TRAINING_RESOLUTION_SETTING,
+            DEFAULT_TRAINING_RESOLUTION,
+            64,
+            8192,
+        ),
+        arb_enabled=(
+            arb_enabled if isinstance(arb_enabled, bool) else DEFAULT_ARB_ENABLED
+        ),
+        arb_step=integer_value(
+            SIMULATOR_ARB_STEP_SETTING, DEFAULT_ARB_STEP, 8, 1024
+        ),
+        arb_min_size=minimum,
+        arb_max_size=maximum,
+        no_upscale=(
+            no_upscale if isinstance(no_upscale, bool) else DEFAULT_NO_UPSCALE
+        ),
+    )
+
+
+def get_grid_type(settings: JsonSettings) -> str:
+    grid_type = settings.value(
+        SIMULATOR_GRID_TYPE_SETTING, DEFAULT_GRID_TYPE, type=str
+    )
+    if isinstance(grid_type, str) and grid_type in GRID_TYPES:
+        return grid_type
+    return DEFAULT_GRID_TYPE
 
 
 def get_use_unlink(settings: JsonSettings, key: str) -> bool:

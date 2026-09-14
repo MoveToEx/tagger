@@ -208,6 +208,33 @@ def test_image_view_preserves_aspect_ratio_at_small_zoom(qtbot) -> None:
     assert view._label.width() / view._label.height() == 1000 / 600
 
 
+def test_image_view_draws_source_pixel_grid(qtbot) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    image = QImage(32, 32, QImage.Format.Format_RGB32)
+    image.fill(QColor("black"))
+    view.resize(64, 64)
+    view.set_fit_to_window(False)
+    view.set_image(image)
+    view.set_grid_size(8)
+    view.show()
+    qtbot.waitExposed(view)
+
+    canvas = view._label
+    rendered = QImage(canvas.size(), QImage.Format.Format_RGB32)
+    canvas.render(rendered)
+
+    assert rendered.pixelColor(8, 4).lightness() > 0
+    assert rendered.pixelColor(4, 4) == QColor("black")
+
+    image.fill(QColor("white"))
+    view.set_image(image)
+    canvas.render(rendered)
+
+    assert rendered.pixelColor(7, 4).lightness() < 255
+    assert rendered.pixelColor(4, 4) == QColor("white")
+
+
 def test_preview_loader_ignores_stale_generation(qtbot, tmp_path: Path) -> None:
     loader = PreviewLoader()
     received: list[str] = []

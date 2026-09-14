@@ -109,6 +109,10 @@ class WindowActions:
         )
         self.pixel_transform_action = QAction("Pixel Transform...", self.window)
         self.pixel_transform_action.triggered.connect(self.window.dialogs._open_pixel_transform)
+        self.grid_preview_action = QAction("Grid Preview...", self.window)
+        self.grid_preview_action.triggered.connect(
+            self.window.dialogs._open_grid_preview
+        )
         self.vae_preview_action = QAction("VAE Preview...", self.window)
         self.vae_preview_action.triggered.connect(
             self.window.dialogs._open_vae_preview
@@ -253,6 +257,8 @@ class WindowActions:
         image_menu.addAction(self.delete_filter_action)
         image_menu.addAction(self.deduplicate_action)
         image_menu.addAction(self.pixel_transform_action)
+        image_menu.addSeparator()
+        image_menu.addAction(self.grid_preview_action)
         image_menu.addAction(self.vae_preview_action)
         image_menu.addSeparator()
         image_menu.addAction(self.crop_action)
@@ -337,6 +343,7 @@ class WindowActions:
         self.transform_images_action.setEnabled(count > 0)
         self.mask_editor_action.setEnabled(count > 0)
         self.crop_action.setEnabled(count > 0)
+        self.grid_preview_action.setEnabled(has_current)
         self.vae_preview_action.setEnabled(has_current)
         self.remove_transparency_action.setEnabled(has_directory)
         if self.alpha_menu is not None:

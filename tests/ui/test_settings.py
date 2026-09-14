@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox, QTreeWidget
 
 from tagger.ai_tagging.model_dialog import ModelManagementDialog
+from tagger.preprocess import ANIMA_DIT_GRID, VAE_LATENT_GRID
 from tagger.settings.dialog import SettingsDialog
 from tagger.settings.preferences import (
     CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
@@ -17,6 +18,13 @@ from tagger.settings.preferences import (
     PROXY_MODE_SETTING,
     PROXY_SETTING,
     SCROLLING_BEHAVIOR_SETTING,
+    SIMULATOR_ARB_ENABLED_SETTING,
+    SIMULATOR_ARB_MAX_SIZE_SETTING,
+    SIMULATOR_ARB_MIN_SIZE_SETTING,
+    SIMULATOR_ARB_STEP_SETTING,
+    SIMULATOR_GRID_TYPE_SETTING,
+    SIMULATOR_NO_UPSCALE_SETTING,
+    SIMULATOR_TRAINING_RESOLUTION_SETTING,
     UNDERSCORES_SETTING,
     USE_UNLINK_FOR_DEDUPLICATE_SETTING,
     USE_UNLINK_FOR_DELETE_FILTER_SETTING,
@@ -24,7 +32,9 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_TIDY_SETTING,
     get_deletion_behavior,
     get_catalog_click_hold_behavior,
+    get_grid_type,
     get_image_prefetch_count,
+    get_preprocess_options,
     get_scrolling_behavior,
     get_use_unlink,
 )
@@ -196,6 +206,68 @@ def test_general_settings_stages_traversal_image_prefetch_count(
     persisted = JsonSettings(settings_path)
     assert persisted.value(IMAGE_PREFETCH_COUNT_SETTING, type=int) == 5
     assert get_image_prefetch_count(persisted) == 5
+
+
+def test_simulator_settings_stage_preprocess_options(
+    qtbot, tmp_path: Path
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = JsonSettings(settings_path)
+    dialog = SettingsDialog(settings=settings)
+    qtbot.addWidget(dialog)
+
+    dialog.navigation_tree.setCurrentItem(dialog.grid_item)
+    assert dialog.pages.currentWidget() is dialog.grid_page
+    assert not hasattr(dialog, "preprocess_group")
+    assert dialog.training_resolution_input.value() == 1024
+    assert dialog.arb_enabled_checkbox.isChecked()
+    assert dialog.arb_step_input.value() == 64
+    assert dialog.arb_min_size_input.value() == 256
+    assert dialog.arb_max_size_input.value() == 2048
+    assert not dialog.no_upscale_checkbox.isChecked()
+    assert dialog.grid_type_input.currentData() == ANIMA_DIT_GRID
+    assert [
+        dialog.grid_type_input.itemText(index)
+        for index in range(dialog.grid_type_input.count())
+    ] == ["Anima DiT (16 x 16 px)", "VAE latent (8 x 8 px)"]
+    assert_stable_widget_size(dialog.grid_type_input)
+    for spin_box in (
+        dialog.training_resolution_input,
+        dialog.arb_step_input,
+        dialog.arb_min_size_input,
+        dialog.arb_max_size_input,
+    ):
+        assert_stable_widget_size(
+            spin_box, minimum_width=112, vertical_padding=2
+        )
+
+    dialog.training_resolution_input.setValue(768)
+    dialog.arb_step_input.setValue(128)
+    dialog.arb_min_size_input.setValue(384)
+    dialog.arb_max_size_input.setValue(1536)
+    dialog.no_upscale_checkbox.setChecked(True)
+    dialog.arb_enabled_checkbox.setChecked(False)
+    dialog.grid_type_input.setCurrentIndex(
+        dialog.grid_type_input.findData(VAE_LATENT_GRID)
+    )
+
+    assert dialog.apply_button.isEnabled()
+    assert not dialog.arb_step_input.isEnabled()
+    assert settings.value(SIMULATOR_TRAINING_RESOLUTION_SETTING) is None
+    dialog.apply_button.click()
+
+    assert not dialog.apply_button.isEnabled()
+    assert get_preprocess_options(JsonSettings(settings_path)) == (
+        get_preprocess_options(settings)
+    )
+    assert settings.value(SIMULATOR_TRAINING_RESOLUTION_SETTING) == 768
+    assert settings.value(SIMULATOR_ARB_ENABLED_SETTING) is False
+    assert settings.value(SIMULATOR_ARB_STEP_SETTING) == 128
+    assert settings.value(SIMULATOR_ARB_MIN_SIZE_SETTING) == 384
+    assert settings.value(SIMULATOR_ARB_MAX_SIZE_SETTING) == 1536
+    assert settings.value(SIMULATOR_NO_UPSCALE_SETTING) is True
+    assert settings.value(SIMULATOR_GRID_TYPE_SETTING) == VAE_LATENT_GRID
+    assert get_grid_type(JsonSettings(settings_path)) == VAE_LATENT_GRID
 
 
 def test_general_settings_stages_startup_folder_preference(
@@ -509,7 +581,7 @@ def test_settings_tree_stages_proxy_until_applied(qtbot, tmp_path: Path) -> None
     ]
     assert [
         item.text(0) for item in top_level_items if item is not None
-    ] == ["General", "Models", "Autocomplete", "Network"]
+    ] == ["General", "Models", "Grid", "Autocomplete", "Network"]
     assert dialog.network_item.childCount() == 1
     assert dialog.network_item.child(0).text(0) == "Proxy"
     assert dialog.network_item.isExpanded()

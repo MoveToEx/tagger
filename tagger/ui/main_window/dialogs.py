@@ -20,7 +20,9 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_DEDUPLICATE_SETTING,
     USE_UNLINK_FOR_DELETE_FILTER_SETTING,
     get_deletion_behavior,
+    get_grid_type,
     get_image_prefetch_count,
+    get_preprocess_options,
     get_scripting_use_tag_set,
     get_scrolling_behavior,
 )
@@ -34,6 +36,7 @@ from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
 from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
 from tagger.ui.dialogs.mask_editor import MaskEditorDialog, MaskSelectionDialog
 from tagger.ui.dialogs.review import ReviewDialog
+from tagger.ui.dialogs.grid_preview import GridPreviewDialog
 from tagger.ui.dialogs.traversal import TraversalDialog
 from tagger.ui.dialogs.image_transform import ImageTransformDialog, ConvertProgressDialog
 from tagger.ui.dialogs.pixel_transform import PixelTransformDialog
@@ -249,6 +252,19 @@ class DialogController:
         if dialog.exec() == PixelTransformDialog.DialogCode.Accepted and self.window.directory is not None:
             self.window.preview_loader.clear()
             self.window.folders._load_directory(self.window.directory, preferred_image=current.image_path if current else None, show_issues=False)
+
+    def _open_grid_preview(self) -> None:
+        current = self.window._current_entry()
+        if current is None or not self.window.catalog.entries:
+            return
+        GridPreviewDialog(
+            list(self.window.catalog.entries),
+            self.window,
+            options=get_preprocess_options(self.window.settings),
+            grid_type=get_grid_type(self.window.settings),
+            initial_image_path=current.image_path,
+            image_prefetch_count=get_image_prefetch_count(self.window.settings),
+        ).exec()
 
     def _open_vae_preview(self) -> None:
         current = self.window._current_entry()

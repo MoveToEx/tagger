@@ -31,6 +31,7 @@ from tagger.ai_tagging.dependencies import (
 )
 from tagger.ai_tagging.model_dialog import ModelManagementDialog
 from tagger.paths import get_tag_library_path
+from tagger.preprocess import GRID_TYPES, PreprocessOptions
 from tagger.settings.dialog_helpers import _format_byte_size, _stabilize_checkbox
 from tagger.settings.preferences import (
     CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
@@ -47,6 +48,13 @@ from tagger.settings.preferences import (
     SCRIPTING_TAG_SET,
     SCRIPTING_TAGS_TYPE_SETTING,
     SCROLLING_BEHAVIOR_SETTING,
+    SIMULATOR_ARB_ENABLED_SETTING,
+    SIMULATOR_ARB_MAX_SIZE_SETTING,
+    SIMULATOR_ARB_MIN_SIZE_SETTING,
+    SIMULATOR_ARB_STEP_SETTING,
+    SIMULATOR_GRID_TYPE_SETTING,
+    SIMULATOR_NO_UPSCALE_SETTING,
+    SIMULATOR_TRAINING_RESOLUTION_SETTING,
     SYSTEM_PROXY,
     UNDERSCORES_SETTING,
     USE_UNLINK_FOR_DEDUPLICATE_SETTING,
@@ -54,7 +62,9 @@ from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
     USE_UNLINK_FOR_TIDY_SETTING,
     get_catalog_click_hold_behavior,
+    get_grid_type,
     get_image_prefetch_count,
+    get_preprocess_options,
     get_scripting_tags_type,
     get_scrolling_behavior,
     get_use_unlink,
@@ -133,6 +143,8 @@ class SettingsDialog(QDialog):
         self._applied_image_prefetch_count = get_image_prefetch_count(
             self.settings
         )
+        self._applied_preprocess_options = get_preprocess_options(self.settings)
+        self._applied_grid_type = get_grid_type(self.settings)
         self._applied_scripting_tags_type = get_scripting_tags_type(
             self.settings
         )
@@ -171,12 +183,14 @@ class SettingsDialog(QDialog):
 
         self.general_page = self._create_general_page()
         self.models_page = self._create_models_page()
+        self.grid_page = self._create_grid_page()
         self.tag_library_dialog: DownloadTagsDialog | None = None
         self.autocomplete_page = self._create_autocomplete_page()
         self.scripting_page = self._create_scripting_page()
         self.proxy_page = self._create_proxy_page()
         self.pages.addWidget(self.general_page)
         self.pages.addWidget(self.models_page)
+        self.pages.addWidget(self.grid_page)
         self.pages.addWidget(self.autocomplete_page)
         self.pages.addWidget(self.scripting_page)
         self.pages.addWidget(self.proxy_page)
@@ -186,6 +200,9 @@ class SettingsDialog(QDialog):
         )
         self.models_item = self._add_navigation_item(
             "Models", self.models_page
+        )
+        self.grid_item = self._add_navigation_item(
+            "Grid", self.grid_page
         )
         self.autocomplete_item = self._add_navigation_item(
             "Autocomplete", self.autocomplete_page
@@ -415,6 +432,115 @@ class SettingsDialog(QDialog):
             self._settings_changed
         )
         return page
+
+    def _create_grid_page(self) -> QWidget:
+        page = QWidget()
+
+        self.training_resolution_input = QSpinBox()
+        self.training_resolution_input.setRange(64, 8192)
+        self.training_resolution_input.setSingleStep(64)
+        self.training_resolution_input.setSuffix(" px")
+        self.training_resolution_input.setValue(
+            self._applied_preprocess_options.training_resolution
+        )
+        stabilize_widget_size(
+            self.training_resolution_input,
+            minimum_width=112,
+            vertical_padding=2,
+        )
+
+        self.arb_enabled_checkbox = QCheckBox("Enabled")
+        self.arb_enabled_checkbox.setChecked(
+            self._applied_preprocess_options.arb_enabled
+        )
+        _stabilize_checkbox(self.arb_enabled_checkbox)
+
+        self.arb_step_input = QSpinBox()
+        self.arb_step_input.setRange(8, 1024)
+        self.arb_step_input.setSingleStep(8)
+        self.arb_step_input.setSuffix(" px")
+        self.arb_step_input.setValue(self._applied_preprocess_options.arb_step)
+        stabilize_widget_size(
+            self.arb_step_input, minimum_width=112, vertical_padding=2
+        )
+
+        self.arb_min_size_input = QSpinBox()
+        self.arb_min_size_input.setRange(64, 8192)
+        self.arb_min_size_input.setSingleStep(64)
+        self.arb_min_size_input.setSuffix(" px")
+        self.arb_min_size_input.setValue(
+            self._applied_preprocess_options.arb_min_size
+        )
+        stabilize_widget_size(
+            self.arb_min_size_input, minimum_width=112, vertical_padding=2
+        )
+
+        self.arb_max_size_input = QSpinBox()
+        self.arb_max_size_input.setRange(64, 8192)
+        self.arb_max_size_input.setSingleStep(64)
+        self.arb_max_size_input.setSuffix(" px")
+        self.arb_max_size_input.setValue(
+            self._applied_preprocess_options.arb_max_size
+        )
+        stabilize_widget_size(
+            self.arb_max_size_input, minimum_width=112, vertical_padding=2
+        )
+
+        self.no_upscale_checkbox = QCheckBox("No upscale")
+        self.no_upscale_checkbox.setChecked(
+            self._applied_preprocess_options.no_upscale
+        )
+        _stabilize_checkbox(self.no_upscale_checkbox)
+
+        self.grid_type_input = QComboBox()
+        for grid_type, (label, _size) in GRID_TYPES.items():
+            self.grid_type_input.addItem(label, grid_type)
+        self.grid_type_input.setCurrentIndex(
+            self.grid_type_input.findData(self._applied_grid_type)
+        )
+        stabilize_widget_size(self.grid_type_input)
+
+        form = QFormLayout()
+        form.addRow("Training resolution", self.training_resolution_input)
+        form.addRow("ARB", self.arb_enabled_checkbox)
+        form.addRow("ARB step", self.arb_step_input)
+        form.addRow("ARB minimum size", self.arb_min_size_input)
+        form.addRow("ARB maximum size", self.arb_max_size_input)
+        form.addRow("Upscaling", self.no_upscale_checkbox)
+        form.addRow("Grid type", self.grid_type_input)
+
+        page_layout = QVBoxLayout(page)
+        page_layout.addLayout(form)
+        page_layout.addStretch(1)
+
+        self.training_resolution_input.valueChanged.connect(
+            self._settings_changed
+        )
+        self.arb_enabled_checkbox.toggled.connect(
+            self._arb_enabled_changed
+        )
+        self.arb_step_input.valueChanged.connect(self._settings_changed)
+        self.arb_min_size_input.valueChanged.connect(self._settings_changed)
+        self.arb_max_size_input.valueChanged.connect(self._settings_changed)
+        self.no_upscale_checkbox.toggled.connect(self._settings_changed)
+        self.grid_type_input.currentIndexChanged.connect(
+            self._settings_changed
+        )
+        self._update_arb_control_states()
+        return page
+
+    def _arb_enabled_changed(self, _checked: bool) -> None:
+        self._update_arb_control_states()
+        self._settings_changed()
+
+    def _update_arb_control_states(self) -> None:
+        enabled = self.arb_enabled_checkbox.isChecked()
+        for control in (
+            self.arb_step_input,
+            self.arb_min_size_input,
+            self.arb_max_size_input,
+        ):
+            control.setEnabled(enabled)
 
     def _create_models_page(self) -> QWidget:
         if not ai_dependencies_available():
@@ -654,6 +780,9 @@ class SettingsDialog(QDialog):
             != self._applied_catalog_click_hold_behavior
             or self.image_prefetch_count_input.value()
             != self._applied_image_prefetch_count
+            or self._preprocess_options()
+            != self._applied_preprocess_options
+            or self._grid_type() != self._applied_grid_type
             or self.open_recent_folder_checkbox.isChecked()
             != self._applied_open_recent_folder_on_startup
             or self._use_unlink_options()
@@ -691,6 +820,26 @@ class SettingsDialog(QDialog):
             self.deduplicate_use_unlink_checkbox.isChecked(),
         )
 
+    def _preprocess_options(self) -> PreprocessOptions:
+        minimum = self.arb_min_size_input.value()
+        maximum = self.arb_max_size_input.value()
+        return PreprocessOptions(
+            training_resolution=self.training_resolution_input.value(),
+            arb_enabled=self.arb_enabled_checkbox.isChecked(),
+            arb_step=self.arb_step_input.value(),
+            arb_min_size=min(minimum, maximum),
+            arb_max_size=max(minimum, maximum),
+            no_upscale=self.no_upscale_checkbox.isChecked(),
+        )
+
+    def _grid_type(self) -> str:
+        grid_type = self.grid_type_input.currentData()
+        return (
+            grid_type
+            if isinstance(grid_type, str) and grid_type in GRID_TYPES
+            else self._applied_grid_type
+        )
+
     def _scripting_tags_type(self) -> str:
         tags_type = self.scripting_tags_input.currentData()
         return tags_type if isinstance(tags_type, str) else SCRIPTING_TAG_SET
@@ -708,6 +857,8 @@ class SettingsDialog(QDialog):
         scrolling_behavior = self._scrolling_behavior()
         catalog_click_hold_behavior = self._catalog_click_hold_behavior()
         image_prefetch_count = self.image_prefetch_count_input.value()
+        preprocess_options = self._preprocess_options()
+        grid_type = self._grid_type()
         open_recent_folder_on_startup = (
             self.open_recent_folder_checkbox.isChecked()
         )
@@ -730,6 +881,26 @@ class SettingsDialog(QDialog):
             OPEN_RECENT_FOLDER_ON_STARTUP_SETTING,
             open_recent_folder_on_startup,
         )
+        self.settings.setValue(
+            SIMULATOR_TRAINING_RESOLUTION_SETTING,
+            preprocess_options.training_resolution,
+        )
+        self.settings.setValue(
+            SIMULATOR_ARB_ENABLED_SETTING, preprocess_options.arb_enabled
+        )
+        self.settings.setValue(
+            SIMULATOR_ARB_STEP_SETTING, preprocess_options.arb_step
+        )
+        self.settings.setValue(
+            SIMULATOR_ARB_MIN_SIZE_SETTING, preprocess_options.arb_min_size
+        )
+        self.settings.setValue(
+            SIMULATOR_ARB_MAX_SIZE_SETTING, preprocess_options.arb_max_size
+        )
+        self.settings.setValue(
+            SIMULATOR_NO_UPSCALE_SETTING, preprocess_options.no_upscale
+        )
+        self.settings.setValue(SIMULATOR_GRID_TYPE_SETTING, grid_type)
         self.settings.setValue(UNDERSCORES_SETTING, underscores)
         self.settings.setValue(PARENTHESES_SETTING, parentheses)
         self.settings.setValue(
@@ -771,6 +942,8 @@ class SettingsDialog(QDialog):
         self._applied_scrolling_behavior = scrolling_behavior
         self._applied_catalog_click_hold_behavior = catalog_click_hold_behavior
         self._applied_image_prefetch_count = image_prefetch_count
+        self._applied_preprocess_options = preprocess_options
+        self._applied_grid_type = grid_type
         self._applied_open_recent_folder_on_startup = (
             open_recent_folder_on_startup
         )
