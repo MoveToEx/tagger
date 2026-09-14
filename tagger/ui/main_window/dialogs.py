@@ -6,8 +6,14 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QMessageBox
 
-from tagger.ai_tagging.dependencies import ai_dependencies_available
+from tagger.ai_tagging import cache
+from tagger.ai_tagging.dependencies import (
+    ai_dependencies_available,
+    missing_vae_dependencies,
+    vae_dependencies_available,
+)
 from tagger.ai_tagging.dialog import AITaggingDialog
+from tagger.ai_tagging.models import QWEN_IMAGE_VAE
 from tagger.domain.models import TagOperation
 from tagger.settings.dialog import SettingsDialog
 from tagger.settings.preferences import (
@@ -16,6 +22,7 @@ from tagger.settings.preferences import (
     get_deletion_behavior,
     get_image_prefetch_count,
     get_scripting_use_tag_set,
+    get_scrolling_behavior,
 )
 from tagger.settings.proxy import get_download_proxy
 from tagger.trash import UNLINK, delete_file
@@ -34,6 +41,7 @@ from tagger.ui.dialogs.transparency import (
     TransparencyProgressDialog,
     TransparencySelectionDialog,
 )
+from tagger.ui.dialogs.vae_preview import VaePreviewDialog
 
 
 if TYPE_CHECKING:
@@ -241,6 +249,35 @@ class DialogController:
         if dialog.exec() == PixelTransformDialog.DialogCode.Accepted and self.window.directory is not None:
             self.window.preview_loader.clear()
             self.window.folders._load_directory(self.window.directory, preferred_image=current.image_path if current else None, show_issues=False)
+
+    def _open_vae_preview(self) -> None:
+        current = self.window._current_entry()
+        if current is None or not self.window.catalog.entries:
+            return
+        if not vae_dependencies_available():
+            QMessageBox.information(
+                self.window,
+                "VAE Preview Dependencies Missing",
+                "Install the ai-tagger dependency group to use VAE preview.\n\n"
+                + ", ".join(missing_vae_dependencies()),
+            )
+            return
+        if not cache._cached_model_locations(
+            QWEN_IMAGE_VAE.repo_id, QWEN_IMAGE_VAE.required_files
+        ):
+            QMessageBox.information(
+                self.window,
+                "VAE Model Not Available",
+                "Download Qwen Image VAE from Settings > Models first.",
+            )
+            return
+        VaePreviewDialog(
+            list(self.window.catalog.entries),
+            self.window,
+            initial_image_path=current.image_path,
+            scrolling_behavior=get_scrolling_behavior(self.window.settings),
+            image_prefetch_count=get_image_prefetch_count(self.window.settings),
+        ).exec()
 
     def _open_crop(self, *, initial_paths: list[Path] | None = None) -> None:
         if not self.window.catalog.entries:

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMenu, QSizePolicy, QToolBar, QToolButton, QWidget
 from tagger.ai_tagging.dependencies import (
     ai_dependencies_available,
     missing_ai_dependencies,
+    missing_vae_dependencies,
 )
 from tagger.domain.models import TagOperation
 from tagger.image_processing import ALPHA_DISPLAY_FILTERS
@@ -108,6 +109,16 @@ class WindowActions:
         )
         self.pixel_transform_action = QAction("Pixel Transform...", self.window)
         self.pixel_transform_action.triggered.connect(self.window.dialogs._open_pixel_transform)
+        self.vae_preview_action = QAction("VAE Preview...", self.window)
+        self.vae_preview_action.triggered.connect(
+            self.window.dialogs._open_vae_preview
+        )
+        missing_vae = missing_vae_dependencies()
+        if missing_vae:
+            self.vae_preview_action.setToolTip(
+                "Install the ai-tagger dependency group: "
+                + ", ".join(missing_vae)
+            )
         self.remove_transparency_action = QAction(
             "Remove Transparency...", self.window
         )
@@ -242,6 +253,7 @@ class WindowActions:
         image_menu.addAction(self.delete_filter_action)
         image_menu.addAction(self.deduplicate_action)
         image_menu.addAction(self.pixel_transform_action)
+        image_menu.addAction(self.vae_preview_action)
         image_menu.addSeparator()
         image_menu.addAction(self.crop_action)
         image_menu.addSeparator()
@@ -325,6 +337,7 @@ class WindowActions:
         self.transform_images_action.setEnabled(count > 0)
         self.mask_editor_action.setEnabled(count > 0)
         self.crop_action.setEnabled(count > 0)
+        self.vae_preview_action.setEnabled(has_current)
         self.remove_transparency_action.setEnabled(has_directory)
         if self.alpha_menu is not None:
             self.alpha_menu.setEnabled(count > 0)

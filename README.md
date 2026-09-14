@@ -9,8 +9,8 @@ An image tagging app based on PySide6, intended to assist in small-scale image d
 ```sh
 $ git clone https://github.com/MoveToEx/tagger.git
 $ cd tagger
-$ uv sync --all-groups    # if AI tagging is needed
-$ uv sync                 # if AI tagging is not needed
+$ uv sync --all-groups    # if AI tagging or VAE preview is needed
+$ uv sync                 # without model-backed features
 $ uv run python ./main.py
 ```
 
@@ -135,6 +135,19 @@ take longer each time inference is run.
 
 After inference completes, you are supposed to check tags one by one. You can use shortcuts from the traversal window here.
 
+#### VAE preview
+
+_Image_ > _VAE Preview_ encodes the current image with Qwen Image VAE and
+decodes it back to pixels. Download _Qwen Image VAE_ from _Settings_ > _Models_
+first. The model list identifies tagging and VAE models in its _Type_ column.
+
+The preview starts on the image selected in the main window. Move the pointer
+over the preview to compare the decoded image above the pointer with the
+original below it. The view supports drag-to-pan, zoom controls, the configured
+mouse-wheel behavior, Left/Right and browser Back/Forward keys, and mouse side
+buttons. VAE loading and processing run in a separate process so PyTorch, the
+model, and GPU memory are released when the dialog closes.
+
 ## Code layout
 
 `main.py` starts the application through `tagger/app.py`.
@@ -143,6 +156,7 @@ After inference completes, you are supposed to check tags one by one. You can us
 tagger/
   domain/          Image models, tag operations, traversal and review sessions
   ai_tagging/      Dependency checks, model caching/downloads, inference and dialogs
+  vae_preview/     VAE child-process controller and worker
   settings/        JSON storage, preferences, proxy configuration and settings UI
   tag_library/     Binary storage, search index, downloads and completion widgets
   ui/

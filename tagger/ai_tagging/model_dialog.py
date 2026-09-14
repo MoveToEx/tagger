@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from tagger.ai_tagging.models import MODEL_REPOSITORIES
+from tagger.ai_tagging.models import MODEL_SPECS, ModelSpec
 from tagger.paths import get_model_directory
 from tagger.ui.widgets import stabilize_widget_size
 
@@ -33,18 +33,27 @@ class _ModelDownloadWorker(QObject):
         repo_id: str,
         proxy: str | None,
         cache_dir: Path | None = None,
+        filename: str | None = None,
     ) -> None:
         super().__init__()
         self.repo_id = repo_id
         self.proxy = proxy
         self.cache_dir = cache_dir
+        self.filename = filename
 
     def run(self) -> None:
         try:
-            from huggingface_hub import snapshot_download
+            from huggingface_hub import hf_hub_download, snapshot_download
 
             cache._configure_huggingface_proxy(self.proxy)
-            snapshot_download(repo_id=self.repo_id, cache_dir=self.cache_dir)
+            if self.filename is None:
+                snapshot_download(repo_id=self.repo_id, cache_dir=self.cache_dir)
+            else:
+                hf_hub_download(
+                    repo_id=self.repo_id,
+                    filename=self.filename,
+                    cache_dir=self.cache_dir,
+                )
         except Exception as exc:
             self.failed.emit(str(exc))
             return
@@ -57,7 +66,7 @@ class ModelManagementDialog(QDialog):
         self.proxy = proxy.strip() if proxy is not None else None
         self._thread: QThread | None = None
         self._worker: _ModelDownloadWorker | None = None
-        self.setWindowTitle("AI Tagging Models")
+        self.setWindowTitle("Models")
         self.resize(680, 360)
 
         self.download_location_input = QComboBox()
@@ -77,7 +86,7 @@ class ModelManagementDialog(QDialog):
         destination_layout.addRow("Directory", self.download_location_path_label)
 
         self.models = QTreeWidget()
-        self.models.setHeaderLabels(["Model", "Repository", "Status", "Location"])
+        self.models.setHeaderLabels(["Model", "Repository", "Type", "Location"])
         self.models.setRootIsDecorated(False)
         self.models.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
         self.models.itemSelectionChanged.connect(self._update_buttons)
@@ -102,11 +111,20 @@ class ModelManagementDialog(QDialog):
 
     def _refresh_models(self) -> None:
         self.models.clear()
-        for name, repo_id in MODEL_REPOSITORIES.items():
-            locations = cache._cached_model_locations(repo_id)
-            status = "Available" if locations else "Not downloaded"
-            item = QTreeWidgetItem([name, repo_id, status, ", ".join(locations)])
-            item.setData(0, Qt.ItemDataRole.UserRole, repo_id)
+        for model in MODEL_SPECS:
+            locations = cache._cached_model_locations(
+                model.repo_id, model.required_files
+            )
+            item = QTreeWidgetItem(
+                [
+                    model.name,
+                    model.repo_id,
+                    model.model_type,
+                    ", ".join(locations),
+                ]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, model.repo_id)
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, model.filename)
             self.models.addTopLevelItem(item)
         self.models.resizeColumnToContents(0)
         self.models.resizeColumnToContents(1)
@@ -121,6 +139,21 @@ class ModelManagementDialog(QDialog):
     def _selected_repo(self) -> str | None:
         item = self.models.currentItem()
         return str(item.data(0, Qt.ItemDataRole.UserRole)) if item else None
+
+    def _selected_model(self) -> ModelSpec | None:
+        item = self.models.currentItem()
+        if item is None:
+            return None
+        repo_id = item.data(0, Qt.ItemDataRole.UserRole)
+        filename = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        return next(
+            (
+                model
+                for model in MODEL_SPECS
+                if model.repo_id == repo_id and model.filename == filename
+            ),
+            None,
+        )
 
     def _update_buttons(self) -> None:
         self.download_button.setEnabled(
@@ -140,16 +173,17 @@ class ModelManagementDialog(QDialog):
         self.download_location_path_label.setText(str(directory))
 
     def _download_selected(self) -> None:
-        repo_id = self._selected_repo()
-        if repo_id is None or self._thread is not None:
+        model = self._selected_model()
+        if model is None or self._thread is not None:
             return
-        self.status_label.setText(f"Downloading {repo_id}...")
+        self.status_label.setText(f"Downloading {model.repo_id}...")
         self.close_button.setEnabled(False)
         thread = QThread(self)
         worker = _ModelDownloadWorker(
-            repo_id,
+            model.repo_id,
             self.proxy,
             self._selected_download_cache_directory(),
+            model.filename,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)

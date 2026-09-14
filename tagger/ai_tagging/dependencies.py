@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import cache
 import importlib.util
 
-from tagger.ai_tagging.models import AI_DEPENDENCIES
+from tagger.ai_tagging.models import AI_DEPENDENCIES, VAE_DEPENDENCIES
 
 
 def missing_ai_dependencies() -> list[str]:
@@ -13,3 +13,12 @@ def missing_ai_dependencies() -> list[str]:
 @cache
 def ai_dependencies_available() -> bool:
     return not missing_ai_dependencies()
+
+
+def missing_vae_dependencies() -> list[str]:
+    return [name for name in VAE_DEPENDENCIES if importlib.util.find_spec(name) is None]
+
+
+@cache
+def vae_dependencies_available() -> bool:
+    return not missing_vae_dependencies()

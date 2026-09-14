@@ -13,7 +13,11 @@ import tagger.ai_tagging.inference as ai_inference
 from tagger.ai_tagging.dialog import AITaggingDialog
 from tagger.ai_tagging.model_dialog import ModelManagementDialog
 import tagger.ai_tagging.model_dialog as model_dialog_module
-from tagger.ai_tagging.models import AI_DEPENDENCIES, MODEL_REPOSITORIES
+from tagger.ai_tagging.models import (
+    AI_DEPENDENCIES,
+    MODEL_REPOSITORIES,
+    QWEN_IMAGE_VAE,
+)
 from tagger.domain.models import ImageEntry
 
 from .helpers import (
@@ -144,7 +148,7 @@ def test_model_settings_support_local_downloads_and_report_locations(
     assert [header.text(column) for column in range(4)] == [
         "Model",
         "Repository",
-        "Status",
+        "Type",
         "Location",
     ]
     rows = [
@@ -152,15 +156,17 @@ def test_model_settings_support_local_downloads_and_report_locations(
         for index in range(dialog.models.topLevelItemCount())
     ]
     assert [item.text(2) for item in rows if item is not None] == [
-        "Available",
-        "Available",
-        "Available",
-        "Not downloaded",
+        "Tagging",
+        "Tagging",
+        "Tagging",
+        "Tagging",
+        "VAE",
     ]
     assert [item.text(3) for item in rows if item is not None] == [
         "User home",
         "Local data",
         "User home, Local data",
+        "",
         "",
     ]
     assert dialog.download_location_input.currentText() == "User home directory"
@@ -174,6 +180,35 @@ def test_model_settings_support_local_downloads_and_report_locations(
     assert ai_cache._preferred_model_cache_directory(
         repositories[1]
     ) == local_cache
+
+
+def test_vae_model_cache_requires_the_managed_weights_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    user_cache = tmp_path / "user-cache"
+    snapshot = (
+        user_cache
+        / "models--circlestone-labs--Anima"
+        / "snapshots"
+        / "revision"
+    )
+    snapshot.mkdir(parents=True)
+    monkeypatch.setattr(
+        ai_cache, "_user_model_cache_directory", lambda: user_cache
+    )
+
+    assert ai_cache._cached_model_locations(
+        QWEN_IMAGE_VAE.repo_id, QWEN_IMAGE_VAE.required_files
+    ) == []
+
+    assert QWEN_IMAGE_VAE.filename is not None
+    weights = snapshot / QWEN_IMAGE_VAE.filename
+    weights.parent.mkdir(parents=True)
+    weights.write_bytes(b"weights")
+
+    assert ai_cache._cached_model_locations(
+        QWEN_IMAGE_VAE.repo_id, QWEN_IMAGE_VAE.required_files
+    ) == ["User home"]
 
 
 def test_model_download_worker_uses_selected_cache_directory(

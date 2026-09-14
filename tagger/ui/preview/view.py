@@ -33,17 +33,37 @@ class _ImageCanvas(QLabel):
     def __init__(self, text: str) -> None:
         super().__init__(text)
         self._source_pixmap: QPixmap | None = None
+        self._lower_pixmap: QPixmap | None = None
+        self._divider_y: int | None = None
+        self.setMouseTracking(True)
 
     def set_source_pixmap(self, pixmap: QPixmap, size: QSize) -> None:
         self._source_pixmap = pixmap
+        self._lower_pixmap = None
+        self._divider_y = None
         self.setMinimumSize(0, 0)
         self.setText("")
         self.resize(size)
         self.update()
 
+    def set_comparison_pixmaps(
+        self, upper: QPixmap, lower: QPixmap, size: QSize
+    ) -> None:
+        self._source_pixmap = upper
+        self._lower_pixmap = lower
+        if self._divider_y is None:
+            self._divider_y = size.height() // 2
+        self.setMinimumSize(0, 0)
+        self.setText("")
+        self.resize(size)
+        self._divider_y = max(0, min(self.height(), self._divider_y))
+        self.update()
+
     @override
     def clear(self) -> None:
         self._source_pixmap = None
+        self._lower_pixmap = None
+        self._divider_y = None
         self.setMinimumSize(240, 180)
         super().clear()
 
@@ -68,11 +88,38 @@ class _ImageCanvas(QLabel):
             draw_width,
             draw_height,
         )
-        painter.drawPixmap(
-            draw_rect,
-            self._source_pixmap,
-            QRectF(self._source_pixmap.rect()),
-        )
+        if self._lower_pixmap is not None:
+            painter.drawPixmap(
+                draw_rect,
+                self._lower_pixmap,
+                QRectF(self._lower_pixmap.rect()),
+            )
+            painter.save()
+            divider_y = self._divider_y if self._divider_y is not None else 0
+            painter.setClipRect(QRectF(0, 0, self.width(), divider_y))
+            painter.drawPixmap(
+                draw_rect,
+                self._source_pixmap,
+                QRectF(self._source_pixmap.rect()),
+            )
+            painter.restore()
+            painter.setPen(self.palette().highlight().color())
+            painter.drawLine(0, divider_y, self.width(), divider_y)
+        else:
+            painter.drawPixmap(
+                draw_rect,
+                self._source_pixmap,
+                QRectF(self._source_pixmap.rect()),
+            )
+
+    @override
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._lower_pixmap is not None:
+            self._divider_y = max(
+                0, min(self.height(), round(event.position().y()))
+            )
+            self.update()
+        super().mouseMoveEvent(event)
 
 
 class ImageView(QScrollArea):
@@ -93,6 +140,8 @@ class ImageView(QScrollArea):
 
         self._pixmap: QPixmap | None = None
         self._source_image: QImage | None = None
+        self._comparison_image: QImage | None = None
+        self._comparison_pixmap: QPixmap | None = None
         self._alpha_mode = "keep"
         self._fit_to_window = True
         self._scrolling_behavior = SCROLL_PAN
@@ -110,14 +159,30 @@ class ImageView(QScrollArea):
         self._end_drag()
         self._pixmap = None
         self._source_image = None
+        self._comparison_image = None
+        self._comparison_pixmap = None
         self._label.clear()
         self._label.setText(message)
         self._label.resize(self.viewport().size())
 
     def set_image(self, image: QImage) -> None:
         self._source_image = image
+        self._comparison_image = None
+        self._comparison_pixmap = None
         self._pixmap = QPixmap.fromImage(
             apply_alpha_display_filter(image, self._alpha_mode)
+        )
+        self._label.setText("")
+        self._update_pixmap()
+
+    def set_comparison_images(self, original: QImage, decoded: QImage) -> None:
+        self._source_image = decoded
+        self._comparison_image = original
+        self._pixmap = QPixmap.fromImage(
+            apply_alpha_display_filter(decoded, self._alpha_mode)
+        )
+        self._comparison_pixmap = QPixmap.fromImage(
+            apply_alpha_display_filter(original, self._alpha_mode)
         )
         self._label.setText("")
         self._update_pixmap()
@@ -137,6 +202,10 @@ class ImageView(QScrollArea):
             self._pixmap = QPixmap.fromImage(
                 apply_alpha_display_filter(self._source_image, mode)
             )
+            if self._comparison_image is not None:
+                self._comparison_pixmap = QPixmap.fromImage(
+                    apply_alpha_display_filter(self._comparison_image, mode)
+                )
             self._update_pixmap()
 
     def set_fit_to_window(self, enabled: bool) -> None:
@@ -342,4 +411,9 @@ class ImageView(QScrollArea):
             )
         else:
             size = self._pixmap.size() * self._zoom
-        self._label.set_source_pixmap(self._pixmap, size)
+        if self._comparison_pixmap is None:
+            self._label.set_source_pixmap(self._pixmap, size)
+        else:
+            self._label.set_comparison_pixmaps(
+                self._pixmap, self._comparison_pixmap, size
+            )
