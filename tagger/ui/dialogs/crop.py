@@ -298,6 +298,12 @@ class CropDialog(QDialog):
         progress.setCancelButton(None)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
+        progress.setFixedWidth(440)
+        label = progress.findChild(QLabel)
+        if label is not None:
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
         failures: list[str] = []
         try:
             for index, path in enumerate(paths):
