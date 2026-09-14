@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import random
-from typing import override
+from typing import cast, override
 
 from PIL import Image, ImageQt
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
@@ -14,7 +14,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QDoubleSpinBox, QHBoxLayout,
     QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressDialog,
-    QPushButton, QToolButton, QVBoxLayout, QWidget,
+    QPushButton, QToolButton, QVBoxLayout, QWidget, QSlider, QComboBox,
+    QDialogButtonBox, QFormLayout, QMenu,
 )
 
 from tagger.domain.masks import MaskRegion
@@ -311,6 +312,20 @@ class MaskImageView(QWidget):
             if not self.actual_opacity and index != self.hovered_mask:
                 painter.drawPolygon(self._polygon(mask))
             painter.setOpacity(1.0)
+            if mask.fadeout_mode != "none" and mask.fadeout_width > 0:
+                left, top, right, bottom = mask.bounds
+                amount = mask.fadeout_width
+                if mask.fadeout_mode == "outside":
+                    left, top = max(0.0, left - amount), max(0.0, top - amount)
+                    right, bottom = min(self._pixmap.width(), right + amount), min(self._pixmap.height(), bottom + amount)
+                else:
+                    left, top = min(right, left + amount), min(bottom, top + amount)
+                    right, bottom = max(left, right - amount), max(top, bottom - amount)
+                painter.setPen(QPen(color, 2))
+                painter.setBrush(QColor(color).lighter(165))
+                painter.setOpacity(0.3)
+                painter.drawRect(QRectF(left, top, max(0.0, right - left), max(0.0, bottom - top)))
+                painter.setOpacity(1.0)
             pen = QPen(color, 2)
             pen.setCosmetic(True)
             painter.setPen(pen)
@@ -497,30 +512,46 @@ class MaskList(QListWidget):
         self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDragDropOverwriteMode(False)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     @override
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if isinstance(watched, QLabel) and isinstance(event, QMouseEvent) and event.type() in {
             QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease,
         }:
-            # Forward the handle gesture to Qt's native list drag/drop behavior.
             position = watched.mapTo(self.viewport(), event.position())
-            forwarded = QMouseEvent(
-                event.type(), position, event.globalPosition(),
-                event.button(), event.buttons(), event.modifiers(),
-            )
+            forwarded = QMouseEvent(event.type(), position, event.globalPosition(), event.button(), event.buttons(), event.modifiers())
             QApplication.sendEvent(self.viewport(), forwarded)
             return True
         return super().eventFilter(watched, event)
 
 
+class AlphaSlider(QSlider):
+    """Slider exposing alpha as a 0..1 value while moving in 0.1 steps."""
+    def __init__(self, value: float = 0.0, parent: QWidget | None = None) -> None:
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        super().setRange(0, 10)
+        super().setSingleStep(1)
+        self.setValue(value)
+
+    def setValue(self, value: float | int) -> None:  # type: ignore[override]
+        numeric = float(value)
+        super().setValue(round(numeric * 10) if isinstance(value, float) else round(numeric))
+
+    def value(self) -> int:  # type: ignore[override]
+        return cast(int, super().value() / 10.0)
+
+
 class MaskRow(QWidget):
     hovered = Signal(int)
     alpha_changed = Signal(int, float)
+    context_requested = Signal(int, object)
 
     def __init__(self, index: int, mask: MaskRegion) -> None:
         super().__init__()
         self.index = index
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda position: self.context_requested.emit(self.index, self.mapToGlobal(position)))
         self.drag_handle = QLabel()
         self.drag_handle.setPixmap(QIcon(
             str(PROJECT_ROOT / "assets" / "icons" / "drag-handle.svg")
@@ -533,15 +564,18 @@ class MaskRow(QWidget):
         swatch.setFixedSize(20, 20)
         swatch.setStyleSheet(f"background-color: {mask.color}; border: 1px solid #555;")
         swatch.setToolTip(mask.color)
-        self.alpha_input = QDoubleSpinBox()
-        self.alpha_input.setRange(0.0, 1.0)
-        self.alpha_input.setDecimals(3)
-        self.alpha_input.setSingleStep(0.05)
-        self.alpha_input.setValue(mask.alpha)
+        self.alpha_input = AlphaSlider()
+        self.alpha_input.setValue(float(mask.alpha))
         self.alpha_input.setAccessibleName(f"Mask {index + 1} alpha")
-        self.alpha_input.setToolTip("Alpha: 0 = transparent, 1 = opaque")
+        self.alpha_input.setToolTip("Alpha: 0 = transparent, 1 = opaque (step 0.1)")
         stabilize_widget_size(self.alpha_input, minimum_width=88, vertical_padding=2)
-        self.alpha_input.valueChanged.connect(lambda value: self.alpha_changed.emit(self.index, value))
+        self.alpha_value_label = QLabel(f"{mask.alpha:.1f}")
+        self.alpha_value_label.setAccessibleName(f"Mask {index + 1} alpha value")
+        self.alpha_value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.alpha_value_label.setMinimumWidth(30)
+        self.alpha_input.valueChanged.connect(self._alpha_slider_changed)
+        self.alpha_input.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.alpha_input.customContextMenuRequested.connect(lambda position: self.context_requested.emit(self.index, self.alpha_input.mapToGlobal(position)))
         self.name_label = QLabel(f"Mask {index + 1}")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
@@ -549,7 +583,13 @@ class MaskRow(QWidget):
         layout.addWidget(swatch)
         layout.addWidget(self.name_label)
         layout.addStretch()
+        layout.addWidget(self.alpha_value_label)
         layout.addWidget(self.alpha_input)
+
+    def _alpha_slider_changed(self, _value: int) -> None:
+        alpha = self.alpha_input.value()
+        self.alpha_value_label.setText(f"{alpha:.1f}")
+        self.alpha_changed.emit(self.index, alpha)
 
     @override
     def enterEvent(self, event: QEnterEvent) -> None:
@@ -560,6 +600,56 @@ class MaskRow(QWidget):
     def leaveEvent(self, event: QEvent) -> None:
         self.hovered.emit(-1)
         super().leaveEvent(event)
+
+
+class MaskPropertyDialog(QDialog):
+    def __init__(self, mask: MaskRegion, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Mask Properties")
+        self.alpha_input = QDoubleSpinBox(); self.alpha_input.setRange(0, 1); self.alpha_input.setDecimals(2); self.alpha_input.setSingleStep(0.1); self.alpha_input.setValue(mask.alpha)
+        self.fadeout_mode = QComboBox(); self.fadeout_mode.addItem("No fadeout", "none"); self.fadeout_mode.addItem("Fade from outside border", "outside"); self.fadeout_mode.addItem("Fade within border", "inside")
+        self.fadeout_mode.setCurrentIndex(max(0, self.fadeout_mode.findData(mask.fadeout_mode)))
+        self.destination_alpha = QDoubleSpinBox(); self.destination_alpha.setRange(0, 1); self.destination_alpha.setDecimals(2); self.destination_alpha.setSingleStep(0.1); self.destination_alpha.setValue(mask.destination_alpha)
+        self.fadeout_width = QDoubleSpinBox(); self.fadeout_width.setRange(0, 10000); self.fadeout_width.setDecimals(1); self.fadeout_width.setSingleStep(1); self.fadeout_width.setValue(mask.fadeout_width)
+        for control in (self.alpha_input, self.destination_alpha, self.fadeout_width):
+            stabilize_widget_size(control, minimum_width=96, vertical_padding=2)
+        stabilize_widget_size(self.fadeout_mode, minimum_width=180)
+        form = QFormLayout(self); form.addRow("Alpha", self.alpha_input); form.addRow("Fadeout", self.fadeout_mode); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Fadeout width (pixels)", self.fadeout_width)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
+        self.fadeout_mode.currentIndexChanged.connect(self._update_enabled); self._update_enabled()
+
+    def _update_enabled(self, *_args: object) -> None:
+        enabled = self.fadeout_mode.currentData() != "none"
+        self.destination_alpha.setEnabled(enabled); self.fadeout_width.setEnabled(enabled)
+
+    def values(self) -> tuple[float, str, float, float]:
+        return (self.alpha_input.value(), str(self.fadeout_mode.currentData()), self.destination_alpha.value(), self.fadeout_width.value())
+
+
+class FadeoutOptionsDialog(QDialog):
+    """Configure fadeout defaults for masks drawn in the editor."""
+    def __init__(self, mode: str, destination_alpha: float, width: float, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Fadeout Options")
+        self.fadeout_mode = QComboBox(); self.fadeout_mode.addItem("No fadeout", "none"); self.fadeout_mode.addItem("Fade from outside border", "outside"); self.fadeout_mode.addItem("Fade within border", "inside")
+        self.fadeout_mode.setCurrentIndex(max(0, self.fadeout_mode.findData(mode)))
+        self.destination_alpha = QDoubleSpinBox(); self.destination_alpha.setRange(0, 1); self.destination_alpha.setDecimals(2); self.destination_alpha.setSingleStep(0.1); self.destination_alpha.setValue(destination_alpha)
+        self.fadeout_width = QDoubleSpinBox(); self.fadeout_width.setRange(0, 10000); self.fadeout_width.setDecimals(1); self.fadeout_width.setSingleStep(1); self.fadeout_width.setValue(width)
+        stabilize_widget_size(self.fadeout_mode, minimum_width=180)
+        for control in (self.destination_alpha, self.fadeout_width):
+            stabilize_widget_size(control, minimum_width=96, vertical_padding=2)
+        form = QFormLayout(self); form.addRow("Fadeout", self.fadeout_mode); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Fadeout width (pixels)", self.fadeout_width)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
+        self.fadeout_mode.currentIndexChanged.connect(self._update_enabled); self._update_enabled()
+
+    def _update_enabled(self, *_args: object) -> None:
+        enabled = self.fadeout_mode.currentData() != "none"
+        self.destination_alpha.setEnabled(enabled); self.fadeout_width.setEnabled(enabled)
+
+    def values(self) -> tuple[str, float, float]:
+        return (str(self.fadeout_mode.currentData()), self.destination_alpha.value(), self.fadeout_width.value())
 
 
 class MaskEditorDialog(QDialog):
@@ -641,8 +731,27 @@ class MaskEditorDialog(QDialog):
         new_mask_alpha_row.addStretch()
         new_mask_alpha_row.addWidget(self.new_mask_alpha_input)
         mask_layout.addLayout(new_mask_alpha_row)
+        self.new_mask_fadeout_enabled = False
+        self.new_mask_fadeout_mode = "none"
+        self.new_mask_destination_alpha = 0.0
+        self.new_mask_fadeout_width = 0.0
+        self.new_mask_fadeout_button = QToolButton()
+        self.new_mask_fadeout_button.setIcon(QIcon(str(PROJECT_ROOT / "assets" / "icons" / "fadeout.svg")))
+        self.new_mask_fadeout_button.setIconSize(QSize(22, 22))
+        self.new_mask_fadeout_button.setFixedSize(34, 34)
+        self.new_mask_fadeout_button.setCheckable(True)
+        self.new_mask_fadeout_button.setAccessibleName("New mask fadeout")
+        self.new_mask_fadeout_button.setToolTip("Enable fadeout for newly drawn masks (right-click to configure)")
+        stabilize_checked_tool_button(self.new_mask_fadeout_button)
+        self.new_mask_fadeout_button.toggled.connect(self._set_new_mask_fadeout_enabled)
+        self.new_mask_fadeout_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.new_mask_fadeout_button.customContextMenuRequested.connect(self._edit_new_mask_properties)
+        fadeout_row = QHBoxLayout()
+        fadeout_row.addStretch(); fadeout_row.addWidget(self.new_mask_fadeout_button)
+        mask_layout.addLayout(fadeout_row)
         mask_layout.addWidget(QLabel("Current masks · Alpha"))
         self.mask_list = MaskList()
+        self.mask_list.customContextMenuRequested.connect(self._mask_context_menu)
         self.image_view.mask_selected.connect(self.mask_list.setCurrentRow)
         self.mask_list.setMinimumWidth(280)
         self.mask_list.model().rowsMoved.connect(self._masks_reordered)
@@ -750,10 +859,29 @@ class MaskEditorDialog(QDialog):
         color = QColor.fromHsvF(self._hue, 0.72, 0.92).name()
         self.current_masks.insert(0, MaskRegion(
             points, alpha=self.new_mask_alpha_input.value(), color=color,
+            fadeout_mode=self.new_mask_fadeout_mode if self.new_mask_fadeout_enabled else "none",
+            destination_alpha=self.new_mask_destination_alpha,
+            fadeout_width=self.new_mask_fadeout_width,
         ))
         self._changed()
         self._rebuild_mask_list()
         self.mask_list.setCurrentRow(0)
+
+    def _set_new_mask_fadeout_enabled(self, enabled: bool) -> None:
+        self.new_mask_fadeout_enabled = enabled
+
+    def _edit_new_mask_properties(self, _position) -> None:
+        dialog = FadeoutOptionsDialog(
+            self.new_mask_fadeout_mode, self.new_mask_destination_alpha,
+            self.new_mask_fadeout_width, self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        mode, destination, width = dialog.values()
+        self.new_mask_fadeout_mode = mode
+        self.new_mask_destination_alpha = destination
+        self.new_mask_fadeout_width = width
+        self.new_mask_fadeout_button.setChecked(mode != "none")
 
     def _set_base_alpha(self, alpha: float) -> None:
         self._base_alpha = alpha
@@ -786,6 +914,32 @@ class MaskEditorDialog(QDialog):
         self.current_masks[index] = replace(self.current_masks[index], alpha=alpha)
         self._changed()
 
+    def _mask_context_menu(self, position) -> None:
+        item = self.mask_list.itemAt(position)
+        if item is None:
+            return
+        index = self.mask_list.row(item)
+        self.mask_list.setCurrentRow(index)
+        self._show_mask_menu(index, self.mask_list.viewport().mapToGlobal(position))
+
+    def _show_mask_menu(self, index: int, global_position) -> None:
+        menu = QMenu(self.mask_list)
+        properties = menu.addAction("Properties...")
+        properties.triggered.connect(lambda: self._edit_mask_properties(index))
+        menu.exec(global_position)
+
+    def _edit_mask_properties(self, index: int) -> None:
+        if not 0 <= index < len(self.current_masks):
+            return
+        dialog = MaskPropertyDialog(self.current_masks[index], self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        alpha, mode, destination, width = dialog.values()
+        self.current_masks[index] = replace(self.current_masks[index], alpha=alpha, fadeout_mode=mode, destination_alpha=destination, fadeout_width=width)
+        self._changed()
+        self._rebuild_mask_list()
+        self.mask_list.setCurrentRow(index)
+
     def _delete_mask(self) -> None:
         index = self.mask_list.currentRow()
         if 0 <= index < len(self.current_masks):
@@ -809,6 +963,7 @@ class MaskEditorDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, index)
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
             row = MaskRow(index, mask)
+            row.context_requested.connect(self._show_mask_menu)
             row.drag_handle.installEventFilter(self.mask_list)
             row.hovered.connect(self.image_view.set_hovered_mask)
             row.alpha_changed.connect(self._set_alpha)

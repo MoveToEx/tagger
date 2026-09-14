@@ -5,6 +5,7 @@ from math import isfinite
 import os
 from pathlib import Path
 import tempfile
+import numpy as np
 
 from PIL import Image, ImageDraw, ImageOps
 
@@ -50,7 +51,33 @@ def render_masks(
     alpha = Image.new("L", image.size, round(base_alpha * 255))
     draw = ImageDraw.Draw(alpha)
     for mask in reversed(masks):
-        draw.polygon(mask.points, fill=mask.alpha_byte)
+        if mask.fadeout_mode == "none" or mask.fadeout_width <= 0:
+            draw.polygon(mask.points, fill=mask.alpha_byte)
+            continue
+        # Rasterize a signed distance to the polygon boundary.  This keeps
+        # the fade independent of image scale and supports both directions.
+        width, height = image.size
+        yy, xx = np.mgrid[0:height, 0:width]
+        inside = np.zeros((height, width), dtype=bool)
+        polygon = Image.new("1", (width, height), 0)
+        ImageDraw.Draw(polygon).polygon(mask.points, fill=1)
+        inside[:] = np.asarray(polygon, dtype=bool)
+        points = np.asarray(mask.points, dtype=float)
+        distances = np.full((height, width), np.inf)
+        for start, end in zip(points, np.roll(points, -1, axis=0)):
+            vx, vy = end - start
+            denom = vx * vx + vy * vy or 1.0
+            t = np.clip(((xx - start[0]) * vx + (yy - start[1]) * vy) / denom, 0.0, 1.0)
+            distances = np.minimum(distances, np.hypot(xx - (start[0] + t * vx), yy - (start[1] + t * vy)))
+        signed = np.where(inside, distances, -distances)
+        fade_width = mask.fadeout_width
+        if mask.fadeout_mode == "outside":
+            factor = np.clip((signed + fade_width) / fade_width, 0.0, 1.0)
+        else:
+            factor = np.where(inside, np.clip((fade_width - signed) / fade_width, 0.0, 1.0), 0.0)
+        values = np.round((mask.destination_alpha + (mask.alpha - mask.destination_alpha) * factor) * 255).astype(np.uint8)
+        covered = inside if mask.fadeout_mode == "inside" else (signed >= -fade_width)
+        alpha.paste(Image.fromarray(values, mode="L"), (0, 0), Image.fromarray(covered.astype(np.uint8) * 255, mode="L"))
     result.putalpha(alpha)
     return result
 
