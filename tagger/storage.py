@@ -43,6 +43,13 @@ class ArchiveResult:
     archived: list[tuple[str, str]]
 
 
+@dataclass(frozen=True)
+class DreamboothConcept:
+    name: str
+    repeats: int
+    entries: Sequence[ImageEntry]
+
+
 @dataclass
 class _ResolvedImage:
     image_path: Path
@@ -537,37 +544,44 @@ def archive_entries(
     entries: Sequence[ImageEntry],
     destination: Path,
     progress: Callable[[int, int, str], None] | None = None,
+    *,
+    dreambooth_concepts: Sequence[DreamboothConcept] | None = None,
 ) -> ArchiveResult:
     resolved: list[tuple[Path, str, Path, str]] = []
-    occupied_names: set[str] = set()
-    for entry in entries:
-        if not entry.image_path.is_file():
-            raise FileNotFoundError(
-                f"Image file does not exist: {entry.image_path}"
-            )
-        if not entry.tag_path.is_file():
-            raise FileNotFoundError(
-                f"Tag file does not exist: {entry.tag_path}"
-            )
+    if dreambooth_concepts is None:
+        groups = [("", entries)]
+    else:
+        groups: list[tuple[str, Sequence[ImageEntry]]] = []
+        occupied_directories: set[str] = set()
+        for concept in dreambooth_concepts:
+            name = concept.name.strip()
+            if (
+                not name
+                or name in {".", ".."}
+                or "/" in name
+                or "\\" in name
+                or "\0" in name
+            ):
+                raise ValueError(f"Invalid Dreambooth concept name: {name!r}")
+            if concept.repeats < 1:
+                raise ValueError("Dreambooth repeat counts must be positive.")
+            directory = f"{concept.repeats}_{name}"
+            if directory.casefold() in occupied_directories:
+                raise ValueError(
+                    f"Duplicate Dreambooth directory name: {directory}"
+                )
+            occupied_directories.add(directory.casefold())
+            groups.append((directory, concept.entries))
 
-        index = 0
-        while True:
-            output_stem = (
-                entry.image_path.stem
-                if index == 0
-                else f"{entry.image_path.stem}_{index}"
+    for directory, group_entries in groups:
+        occupied_names: set[str] = set()
+        for entry in group_entries:
+            _resolve_archive_entry(
+                entry,
+                directory=directory,
+                occupied_names=occupied_names,
+                resolved=resolved,
             )
-            image_name = f"{output_stem}{entry.image_path.suffix}"
-            tag_name = f"{output_stem}.txt"
-            keys = {image_name.casefold(), tag_name.casefold()}
-            if keys.isdisjoint(occupied_names):
-                break
-            index += 1
-
-        occupied_names.update(keys)
-        resolved.append(
-            (entry.image_path, image_name, entry.tag_path, tag_name)
-        )
 
     destination = Path(destination)
     temporary_path: Path | None = None
@@ -610,6 +624,45 @@ def archive_entries(
             (image_name, tag_name)
             for _image_path, image_name, _tag_path, tag_name in resolved
         ]
+    )
+
+
+def _resolve_archive_entry(
+    entry: ImageEntry,
+    *,
+    directory: str,
+    occupied_names: set[str],
+    resolved: list[tuple[Path, str, Path, str]],
+) -> None:
+    if not entry.image_path.is_file():
+        raise FileNotFoundError(
+            f"Image file does not exist: {entry.image_path}"
+        )
+    if not entry.tag_path.is_file():
+        raise FileNotFoundError(
+            f"Tag file does not exist: {entry.tag_path}"
+        )
+
+    index = 0
+    while True:
+        output_stem = (
+            entry.image_path.stem
+            if index == 0
+            else f"{entry.image_path.stem}_{index}"
+        )
+        image_name = f"{output_stem}{entry.image_path.suffix}"
+        tag_name = f"{output_stem}.txt"
+        keys = {image_name.casefold(), tag_name.casefold()}
+        if keys.isdisjoint(occupied_names):
+            break
+        index += 1
+
+    occupied_names.update(keys)
+    if directory:
+        image_name = f"{directory}/{image_name}"
+        tag_name = f"{directory}/{tag_name}"
+    resolved.append(
+        (entry.image_path, image_name, entry.tag_path, tag_name)
     )
 
 

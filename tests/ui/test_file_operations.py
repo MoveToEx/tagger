@@ -6,7 +6,15 @@ import zipfile
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QInputDialog,
+    QMenu,
+    QMessageBox,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTreeWidgetItemIterator,
+)
 
 from tagger.settings.preferences import (
     USE_UNLINK_FOR_MANUAL_DELETE_SETTING,
@@ -22,7 +30,36 @@ import tagger.ui.main_window.dialogs as window_dialogs
 import tagger.ui.main_window.files as window_files
 from tagger.ui.main_window.window import MainWindow
 
-from .helpers import create_png
+from .helpers import assert_stable_widget_size, create_png
+
+
+def _tree_item_with_name(
+    tree: QTreeWidget, name: str
+) -> QTreeWidgetItem:
+    iterator = QTreeWidgetItemIterator(tree)
+    while iterator.value() is not None:
+        item = iterator.value()
+        if item.text(0) == name:
+            return item
+        iterator += 1
+    raise AssertionError(f"No tree item named {name!r}")
+
+
+def _capture_detached_processes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, list[str]]]:
+    started: list[tuple[str, list[str]]] = []
+
+    class FakeQProcess:
+        @staticmethod
+        def startDetached(
+            program: str, arguments: list[str]
+        ) -> tuple[bool, int]:
+            started.append((program, arguments))
+            return True, 123
+
+    monkeypatch.setattr(window_files, "QProcess", FakeQProcess)
+    return started
 
 
 def test_file_menu_tidy_deletes_unrecognized_files(
@@ -173,6 +210,7 @@ def test_archive_action_compresses_open_folder_without_hierarchy(
     window = MainWindow()
     qtbot.addWidget(window)
     window.folders._load_directory(source, show_issues=False)
+    revealed = _capture_detached_processes(monkeypatch)
     monkeypatch.setattr(
         archive_module.QFileDialog,
         "getSaveFileName",
@@ -210,6 +248,9 @@ def test_archive_action_compresses_open_folder_without_hierarchy(
         assert archive.read("sample.txt") == b"cat\n"
         assert "excluded.png" not in archive.namelist()
     assert "Archived 1 image/tag pair" in window.statusBar().currentMessage()
+    assert revealed == [
+        ("explorer.exe", ["/select,", str(destination)]),
+    ]
 
 
 def test_archive_progress_window_shows_current_file(
@@ -229,6 +270,7 @@ def test_archive_progress_window_shows_current_file(
         return ArchiveResult([("sample.png", "sample.txt")])
 
     monkeypatch.setattr(archive_module, "archive_entries", fake_archive_entries)
+    revealed = _capture_detached_processes(monkeypatch)
     window = MainWindow()
     qtbot.addWidget(window)
     window.folders._load_directory(source, show_issues=False)
@@ -253,6 +295,105 @@ def test_archive_progress_window_shows_current_file(
         release_worker.set()
 
     qtbot.waitUntil(lambda: window.files._archive_dialog is None)
+    assert revealed == [
+        ("explorer.exe", ["/select,", str(destination)]),
+    ]
+
+
+def test_archive_action_creates_dreambooth_concept_directories(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source"
+    cats = source / "cats"
+    dogs = source / "dogs"
+    cats.mkdir(parents=True)
+    dogs.mkdir()
+    create_png(cats / "cat.png")
+    (cats / "cat.txt").write_bytes(b"cat\n")
+    create_png(dogs / "dog.png")
+    (dogs / "dog.txt").write_bytes(b"dog\n")
+    destination = tmp_path / "dreambooth.zip"
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(source, show_issues=False)
+    revealed = _capture_detached_processes(monkeypatch)
+
+    window.commands.archive_action.trigger()
+    selection = window.files._archive_selection_dialog
+    assert selection is not None
+    assert [selection.tabs.tabText(index) for index in range(2)] == [
+        "General",
+        "Dreambooth",
+    ]
+    assert selection.general_tab.isAncestorOf(selection.folder_tree)
+    assert not selection.general_tab.isAncestorOf(selection.archive_button)
+    assert selection.concept_list_panel.minimumWidth() == 180
+    assert selection.concept_list_panel.maximumWidth() == 180
+    content_layout = selection.dreambooth_content.layout()
+    assert content_layout is not None
+    assert content_layout.spacing() == 16
+    assert_stable_widget_size(selection.dreambooth_enabled_checkbox)
+    assert_stable_widget_size(
+        selection.repeat_count_input,
+        minimum_width=96,
+        vertical_padding=2,
+    )
+
+    selection.output_file_input.setText(str(destination))
+    selection.dreambooth_enabled_checkbox.setChecked(True)
+    assert selection.concept_list.count() == 1
+    general_dog = _tree_item_with_name(selection.folder_tree, "dog.png")
+    general_dog.setCheckState(0, Qt.CheckState.Unchecked)
+    with pytest.raises(AssertionError, match="dog.png"):
+        _tree_item_with_name(selection.concept_file_tree, "dog.png")
+    general_dog.setCheckState(0, Qt.CheckState.Checked)
+    assert _tree_item_with_name(
+        selection.concept_file_tree, "dog.png"
+    ).checkState(0) == Qt.CheckState.Unchecked
+    first_concept = selection.concept_list.item(0)
+    assert first_concept is not None
+    assert first_concept.flags() & Qt.ItemFlag.ItemIsEditable
+    assert (
+        selection.concept_list.editTriggers()
+        & QAbstractItemView.EditTrigger.DoubleClicked
+    )
+    first_concept.setText("animals")
+    selection.repeat_count_input.setValue(4)
+    _tree_item_with_name(selection.concept_file_tree, "dog.png").setCheckState(
+        0, Qt.CheckState.Unchecked
+    )
+
+    selection.add_concept_button.click()
+    assert selection.concept_list.count() == 2
+    selection.delete_concept_button.click()
+    assert selection.concept_list.count() == 1
+    selection.add_concept_button.click()
+    second_concept = selection.concept_list.currentItem()
+    assert second_concept is not None
+    second_concept.setText("dogs")
+    selection.repeat_count_input.setValue(2)
+    assert _tree_item_with_name(
+        selection.concept_file_tree, "cats"
+    ).childCount() == 1
+    _tree_item_with_name(selection.concept_file_tree, "dog.png").setCheckState(
+        0, Qt.CheckState.Checked
+    )
+    assert selection.archive_button.isEnabled()
+
+    selection.archive_button.click()
+    qtbot.waitUntil(lambda: destination.exists())
+    qtbot.waitUntil(lambda: window.files._archive_dialog is None)
+
+    with zipfile.ZipFile(destination) as archive:
+        assert archive.namelist() == [
+            "4_animals/cat.png",
+            "4_animals/cat.txt",
+            "2_dogs/dog.png",
+            "2_dogs/dog.txt",
+        ]
+    assert revealed == [
+        ("explorer.exe", ["/select,", str(destination)]),
+    ]
 
 
 def test_image_context_delete_moves_image_and_tag_to_trash(

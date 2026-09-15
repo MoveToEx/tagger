@@ -148,11 +148,15 @@ class FileActions:
             return
         destination = dialog.destination
         entries = dialog.selected_entries
+        dreambooth_concepts = dialog.dreambooth_concepts
         if destination is None or not entries:
             return
 
         progress_dialog = ArchiveProgressDialog(
-            entries, destination, self.window
+            entries,
+            destination,
+            self.window,
+            dreambooth_concepts=dreambooth_concepts,
         )
         progress_dialog.completed.connect(self._archive_completed)
         progress_dialog.failed.connect(self._archive_failed)
@@ -171,6 +175,8 @@ class FileActions:
             f"Archived {archived_count} image/tag pair(s) to {destination}.",
             5000,
         )
+        if destination is not None:
+            self._reveal_path_in_explorer(destination)
 
     def _archive_failed(self, message: str) -> None:
         self._archive_dialog = None
@@ -328,16 +334,18 @@ class FileActions:
         entry = self.window._current_entry()
         if entry is None:
             return
+        self._reveal_path_in_explorer(entry.image_path)
 
+    def _reveal_path_in_explorer(self, path: Path) -> None:
         started, _process_id = QProcess.startDetached(
             "explorer.exe",
-            ["/select,", str(entry.image_path)],
+            ["/select,", str(path)],
         )
         if not started:
             QMessageBox.critical(
                 self.window,
                 "Could Not Open File Explorer",
-                f"Could not reveal {entry.image_path.name} in File Explorer.",
+                f"Could not reveal {path.name} in File Explorer.",
             )
 
     def _rename_current_image_and_tag(self) -> None:

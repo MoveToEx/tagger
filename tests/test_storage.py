@@ -12,6 +12,7 @@ from tagger.storage import (
     archive_entries,
     BatchPreflightError,
     copy_dropped_images,
+    DreamboothConcept,
     duplicate_image_pair,
     ExternalChangeError,
     WriteRequest,
@@ -502,6 +503,69 @@ def test_archive_entries_stores_nested_pairs_with_unique_flat_names(
         ]
         assert archive.read("sample.txt") == b"first tags\n"
         assert archive.read("sample_1.txt") == b"second tags\n"
+
+
+def test_archive_entries_groups_dreambooth_concepts_and_resolves_names(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "archive.zip"
+    first = source / "first"
+    second = source / "second"
+    first.mkdir(parents=True)
+    second.mkdir()
+    touch_image(first / "sample.jpg")
+    touch_image(second / "sample.jpg")
+    (first / "sample.txt").write_bytes(b"first tags\n")
+    (second / "sample.txt").write_bytes(b"second tags\n")
+    entries = scan_folder(source, IMAGE_EXTENSIONS).entries
+
+    result = archive_entries(
+        entries,
+        destination,
+        dreambooth_concepts=[
+            DreamboothConcept("person", 20, entries),
+            DreamboothConcept("style", 3, (entries[0],)),
+        ],
+    )
+
+    assert result.archived == [
+        ("20_person/sample.jpg", "20_person/sample.txt"),
+        ("20_person/sample_1.jpg", "20_person/sample_1.txt"),
+        ("3_style/sample.jpg", "3_style/sample.txt"),
+    ]
+    with zipfile.ZipFile(destination) as archive:
+        assert archive.namelist() == [
+            "20_person/sample.jpg",
+            "20_person/sample.txt",
+            "20_person/sample_1.jpg",
+            "20_person/sample_1.txt",
+            "3_style/sample.jpg",
+            "3_style/sample.txt",
+        ]
+        assert archive.read("20_person/sample_1.txt") == b"second tags\n"
+
+
+def test_archive_entries_rejects_unsafe_dreambooth_concept_name(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    touch_image(source / "sample.png")
+    (source / "sample.txt").write_bytes(b"tags\n")
+    entry = scan_folder(source, IMAGE_EXTENSIONS).entries[0]
+    destination = tmp_path / "archive.zip"
+
+    with pytest.raises(ValueError, match="Invalid Dreambooth concept name"):
+        archive_entries(
+            [entry],
+            destination,
+            dreambooth_concepts=[
+                DreamboothConcept("../outside", 1, (entry,))
+            ],
+        )
+
+    assert not destination.exists()
 
 
 def test_archive_entries_reports_current_file_and_progress(tmp_path: Path) -> None:
