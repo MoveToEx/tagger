@@ -268,6 +268,30 @@ def test_review_session_stages_deletions_and_advances_by_tag(tmp_path: Path) -> 
     assert session.staged_changes()[0][1] == ["cat"]
 
 
+def test_review_session_keeps_all_tags_on_current_image(tmp_path: Path) -> None:
+    session = ReviewSession(
+        [
+            _entry(tmp_path, "first.jpg", ["cat", "dog"]),
+            _entry(tmp_path, "second.jpg", ["bird"]),
+        ]
+    )
+
+    session.delete_current()
+    session.keep_all_current()
+
+    assert session.current_index == 1
+    assert session.current_tag_index == 0
+    assert session.current_tag == "bird"
+    assert session.working_tags[0] == ["cat", "dog"]
+    assert session.reviewed_tags[0] == {"cat", "dog"}
+    assert session.reviewed_tag_count == 2
+    assert session.staged_changes() == []
+
+    session.keep_all_current()
+    assert session.finished
+    assert session.reviewed_tag_count == 3
+
+
 def test_review_navigation_only_shifts_position(tmp_path: Path) -> None:
     session = ReviewSession(
         [
@@ -284,6 +308,16 @@ def test_review_navigation_only_shifts_position(tmp_path: Path) -> None:
     assert session.move_back()
     assert session.current_tag == "dog"
     assert session.current_tags == ["cat"]
+
+
+def test_review_session_selects_tag_without_changing_decisions(tmp_path: Path) -> None:
+    session = ReviewSession([_entry(tmp_path, "sample.jpg", ["cat", "dog"])])
+
+    assert session.select_tag(1)
+    assert session.current_tag == "dog"
+    assert session.reviewed_tag_count == 0
+    assert not session.select_tag(2)
+    assert session.current_tag == "dog"
 
 
 def test_review_session_adds_extra_tags_as_kept(tmp_path: Path) -> None:

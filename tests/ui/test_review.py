@@ -50,6 +50,12 @@ def test_review_keyboard_shortcuts_keep_delete_and_navigate(
         "[pending] dog",
     ]
     assert "#b42318" in dialog.delete_button.styleSheet()
+    assert dialog.keep_all_button.text() == "Keep All"
+    decision_layout = decision_group.layout()
+    assert decision_layout is not None
+    keep_all_item = decision_layout.itemAt(1)
+    assert keep_all_item is not None
+    assert keep_all_item.widget() is dialog.keep_all_button
     assert "Reviewed tags 0 of 3" in dialog.progress_label.text()
     qtbot.keyClick(dialog, Qt.Key.Key_Return)
     assert dialog.session.current_tag == "dog"
@@ -68,6 +74,58 @@ def test_review_keyboard_shortcuts_keep_delete_and_navigate(
     assert dialog.session.current_index == 1
     assert dialog.session.current_tag == "bird"
     assert dialog.session.working_tags[0] == ["cat"]
+
+
+def test_review_keep_all_keeps_current_image_and_advances(qtbot, tmp_path: Path) -> None:
+    entries: list[ImageEntry] = []
+    for name, tags in {"first": ["cat", "dog"], "second": ["bird"]}.items():
+        image_path = tmp_path / f"{name}.png"
+        tag_path = tmp_path / f"{name}.txt"
+        create_png(image_path)
+        source = (", ".join(tags) + "\n").encode()
+        tag_path.write_bytes(source)
+        entries.append(ImageEntry(image_path, tag_path, tags, source))
+
+    dialog = ReviewDialog(entries)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    dialog.keep_all_button.click()
+
+    assert dialog.session.current_index == 1
+    assert dialog.session.current_tag == "bird"
+    assert dialog.session.reviewed_tags[0] == {"cat", "dog"}
+    assert dialog.session.current_tags == ["bird"]
+
+
+def test_review_tag_decision_click_selects_current_tag(qtbot, tmp_path: Path) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_bytes(b"cat, dog\n")
+    dialog = ReviewDialog(
+        [ImageEntry(image_path, tag_path, ["cat", "dog"], b"cat, dog\n")]
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    assert dialog.tag_status_list.selectionMode() == dialog.tag_status_list.SelectionMode.SingleSelection
+    assert dialog.tag_status_list.currentRow() == 0
+    item = dialog.tag_status_list.item(1)
+    assert item is not None
+    qtbot.mouseClick(
+        dialog.tag_status_list.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=dialog.tag_status_list.visualItemRect(item).center(),
+    )
+
+    assert dialog.tag_status_list.currentRow() == 1
+    assert dialog.session.current_tag == "dog"
+    assert dialog.tag_label.text() == "dog"
+    assert "Tag 2 of 2" in dialog.progress_label.text()
+    assert dialog.session.reviewed_tag_count == 0
 
 
 def test_review_extra_tag_input_accepts_spaces(qtbot, tmp_path: Path) -> None:

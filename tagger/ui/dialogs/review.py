@@ -117,10 +117,11 @@ class ReviewDialog(QDialog):
         )
         self.tag_status_list = QListWidget()
         self.tag_status_list.setSelectionMode(
-            QListWidget.SelectionMode.NoSelection
+            QListWidget.SelectionMode.SingleSelection
         )
         self.tag_status_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tag_status_list.setFixedHeight(150)
+        self.tag_status_list.itemClicked.connect(self._tag_status_clicked)
         self.temporary_input = QLineEdit()
         self.temporary_input.setPlaceholderText("Comma-separated tags for this image")
         self.temporary_input.setClearButtonEnabled(True)
@@ -160,6 +161,7 @@ class ReviewDialog(QDialog):
 
         self.back_button = QPushButton("Back")
         self.keep_button = QPushButton("Keep Tag")
+        self.keep_all_button = QPushButton("Keep All")
         self.delete_button = QPushButton("Delete Tag")
         self.delete_button.setStyleSheet(
             "QPushButton { color: #b42318; } "
@@ -171,6 +173,7 @@ class ReviewDialog(QDialog):
         self.confirm_button = self.keep_button
         self.back_button.clicked.connect(self._back)
         self.keep_button.clicked.connect(self._keep)
+        self.keep_all_button.clicked.connect(self._keep_all)
         self.delete_button.clicked.connect(self._delete)
         self.next_button.clicked.connect(self._next)
         self._mouse_navigation = MouseNavigation(
@@ -195,6 +198,7 @@ class ReviewDialog(QDialog):
         decision_layout.setContentsMargins(10, 8, 10, 8)
         decision_layout.setSpacing(8)
         decision_layout.addWidget(self.keep_button)
+        decision_layout.addWidget(self.keep_all_button)
         decision_layout.addWidget(self.delete_button)
         decision_group = QGroupBox("Tag decision")
         decision_group.setLayout(decision_layout)
@@ -427,9 +431,25 @@ class ReviewDialog(QDialog):
         original_tags = set(session.current_item.original_tags)
         for tag in session.current_tags:
             if tag not in original_tags:
-                self.tag_status_list.addItem(QListWidgetItem(f"[kept] {tag}"))
+                item = QListWidgetItem(f"[kept] {tag}")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.tag_status_list.addItem(item)
         if current_row >= 0:
             self.tag_status_list.setCurrentRow(current_row)
+
+    def _tag_status_clicked(self, item: QListWidgetItem) -> None:
+        row = self.tag_status_list.row(item)
+        if not self.session.select_tag(row):
+            return
+        session = self.session
+        self.progress_label.setText(
+            f"Image {session.current_index + 1} of {len(session.items)}"
+            f" | Tag {session.current_tag_index + 1} of "
+            f"{len(session.current_item.original_tags)}"
+            f" | Reviewed tags {session.reviewed_tag_count} of "
+            f"{session.total_tag_count}"
+        )
+        self.tag_label.setText(session.current_tag)
 
     def _update_temporary_button(self, *_args) -> None:
         if self._session is None:
@@ -483,6 +503,10 @@ class ReviewDialog(QDialog):
         self.session.keep_current()
         self._load_current()
 
+    def _keep_all(self) -> None:
+        self.session.keep_all_current()
+        self._load_current()
+
     def _delete(self) -> None:
         self.session.delete_current()
         self._load_current()
@@ -499,6 +523,7 @@ class ReviewDialog(QDialog):
         done = self.session.finished
         self.back_button.setEnabled(not self.session.at_first)
         self.keep_button.setEnabled(not done)
+        self.keep_all_button.setEnabled(not done)
         self.delete_button.setEnabled(not done)
         self.next_button.setEnabled(not done and not self.session.at_last)
         self.finish_button.setEnabled(True)

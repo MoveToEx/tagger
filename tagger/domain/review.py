@@ -112,6 +112,20 @@ class ReviewSession:
         if not self._advance():
             self.completed = True
 
+    def keep_all_current(self) -> None:
+        """Keep every original tag on the current image and advance to the next image."""
+        if self.completed:
+            return
+        index = self.current_index
+        for tag in self.current_item.original_tags:
+            self._restore_original_tag(tag)
+        self.reviewed_tags[index].update(self.current_item.original_tags)
+        if index + 1 < len(self.items):
+            self.current_index = index + 1
+            self.current_tag_index = 0
+        else:
+            self.completed = True
+
     def delete_current(self) -> None:
         if self.completed:
             return
@@ -122,6 +136,14 @@ class ReviewSession:
             tags.remove(tag)
         if not self._advance():
             self.completed = True
+
+    def select_tag(self, tag_index: int) -> bool:
+        if self.completed or not self.items:
+            return False
+        if not 0 <= tag_index < len(self.current_item.original_tags):
+            return False
+        self.current_tag_index = tag_index
+        return True
 
     def add_kept_tags(self, tags: Sequence[str]) -> list[str]:
         if self.completed or not self.items:
