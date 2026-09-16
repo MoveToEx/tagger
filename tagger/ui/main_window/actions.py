@@ -86,6 +86,13 @@ class WindowActions:
         self.global_search_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
         self.global_search_action.triggered.connect(self.window.dialogs._open_global_search)
 
+        self.correlation_analysis_action = QAction(
+            "Correlation Analysis...", self.window
+        )
+        self.correlation_analysis_action.triggered.connect(
+            self.window.dialogs._open_correlation_analysis
+        )
+
         self.review_action = QAction("Review Tags...", self.window)
         self.review_action.setShortcut(QKeySequence("Ctrl+R"))
         self.review_action.triggered.connect(self.window.dialogs._open_review)
@@ -267,6 +274,7 @@ class WindowActions:
         image_menu.addAction(self.mask_editor_action)
         tags_menu = self.window.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
+        tags_menu.addAction(self.correlation_analysis_action)
         tags_menu.addAction(self.review_action)
         tags_menu.addAction(self.complex_filter_action)
         tags_menu.addAction(self.bulk_operation_action)
@@ -338,6 +346,7 @@ class WindowActions:
         )
         self.window.search_input.setEnabled(count > 0)
         self.global_search_action.setEnabled(count > 0)
+        self.correlation_analysis_action.setEnabled(count > 0)
         self.delete_filter_action.setEnabled(count > 0)
         self.deduplicate_action.setEnabled(count >= 2)
         self.transform_images_action.setEnabled(count > 0)

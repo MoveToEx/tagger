@@ -30,6 +30,7 @@ from tagger.settings.proxy import get_download_proxy
 from tagger.trash import UNLINK, delete_file
 from tagger.ui.dialogs.bulk_operation import BulkOperationDialog
 from tagger.ui.dialogs.complex_filter import ComplexFilterDialog
+from tagger.ui.dialogs.correlation_analysis import CorrelationAnalysisDialog
 from tagger.ui.dialogs.crop import CropDialog, CropSelectionDialog
 from tagger.ui.dialogs.deduplicate import DeduplicateDialog
 from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
@@ -264,6 +265,16 @@ class DialogController:
             grid_type=get_grid_type(self.window.settings),
             initial_image_path=current.image_path,
             image_prefetch_count=get_image_prefetch_count(self.window.settings),
+        ).exec()
+
+    def _open_correlation_analysis(self) -> None:
+        if not self.window.catalog.entries or self.window.directory is None:
+            return
+        CorrelationAnalysisDialog(
+            self.window.catalog.entries,
+            self.window,
+            root_directory=self.window.directory,
+            tag_library=self.window.tag_library,
         ).exec()
 
     def _open_vae_preview(self) -> None:

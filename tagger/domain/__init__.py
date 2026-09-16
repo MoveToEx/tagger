@@ -6,6 +6,10 @@ from tagger.domain.models import (
     ScanResult as ScanResult,
     TagOperation as TagOperation,
 )
+from tagger.domain.correlation import (
+    TagCorrelation as TagCorrelation,
+    analyze_tag_correlations as analyze_tag_correlations,
+)
 from tagger.domain.review import (
     ReviewItem as ReviewItem,
     ReviewSession as ReviewSession,
