@@ -20,6 +20,7 @@ class CropImageView(QWidget):
         self._pixmap = QPixmap()
         self.crop_box: CropBox = (0, 0, 0, 0)
         self.aspect_ratio: float | None = None
+        self.resize_enabled = True
         self._drag_mode = ""
         self._drag_start = QPointF()
         self._anchor = QPointF()
@@ -40,6 +41,13 @@ class CropImageView(QWidget):
         self._pixmap = ImageQt.toqpixmap(image.convert("RGBA")) if image else QPixmap()
         self.crop_box = box or (0, 0, self._pixmap.width(), self._pixmap.height())
         self.aspect_ratio = aspect_ratio
+        self.update()
+
+    def set_resize_enabled(self, enabled: bool) -> None:
+        self.resize_enabled = enabled
+        if not enabled and self._drag_mode == "resize":
+            self._drag_mode = ""
+        self.unsetCursor()
         self.update()
 
     def image_rect(self) -> QRectF:
@@ -85,6 +93,8 @@ class CropImageView(QWidget):
             self.update()
 
     def _handles(self) -> dict[str, QPointF]:
+        if not self.resize_enabled:
+            return {}
         rect = self.selection_rect()
         return {
             "nw": rect.topLeft(), "ne": rect.topRight(),
@@ -142,13 +152,16 @@ class CropImageView(QWidget):
         handle = self._hit_handle(event.position())
         if not handle and not self.image_rect().contains(event.position()):
             return
+        inside_selection = self.selection_rect().contains(event.position())
+        if not self.resize_enabled and not inside_selection:
+            return
         self._drag_start = self._image_point(event.position())
         self._original = self.crop_box
         left, top, right, bottom = self.crop_box
         if handle:
             self._drag_mode = "resize"
             self._anchor = QPointF(left if "e" in handle else right, top if "s" in handle else bottom)
-        elif self.selection_rect().contains(event.position()):
+        elif inside_selection:
             self._drag_mode = "move"
         else:
             self._drag_mode = "resize"
@@ -166,7 +179,11 @@ class CropImageView(QWidget):
             elif self.selection_rect().contains(event.position()):
                 cursor = Qt.CursorShape.SizeAllCursor
             else:
-                cursor = Qt.CursorShape.CrossCursor
+                cursor = (
+                    Qt.CursorShape.CrossCursor
+                    if self.resize_enabled
+                    else Qt.CursorShape.ArrowCursor
+                )
             self.setCursor(cursor)
             return
         point = self._image_point(event.position())

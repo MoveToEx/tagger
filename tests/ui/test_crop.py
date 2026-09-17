@@ -8,7 +8,13 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QMenu, QMessageBox
 
 from tagger.domain.models import ImageEntry
-from tagger.ui.dialogs.crop import CropDialog, CropSelectionDialog
+from tagger.preprocess import PreprocessOptions
+from tagger.ui.dialogs.crop import (
+    ARB_MODE,
+    ASPECT_RATIO_MODE,
+    CropDialog,
+    CropSelectionDialog,
+)
 import tagger.ui.dialogs.crop as crop_module
 import tagger.ui.main_window.dialogs as dialogs_module
 from tagger.ui.main_window.window import MainWindow
@@ -93,6 +99,92 @@ def test_preset_crop_rounds_dimensions_without_adding_an_extra_pixel(qtbot, tmp_
     dialog.ratio_buttons["16:9"].click()
     left, top, right, bottom = dialog.image_view.crop_box
     assert (right - left, bottom - top) == (240, 135)
+
+
+def test_arb_mode_uses_closest_bucket_ratio_scaled_to_fit_image(
+    qtbot, tmp_path
+) -> None:
+    path = tmp_path / "wide.png"
+    Image.new("RGB", (900, 400), "blue").save(path)
+    options = PreprocessOptions(
+        training_resolution=512,
+        arb_enabled=False,
+        arb_step=256,
+        arb_min_size=256,
+        arb_max_size=768,
+    )
+    dialog = CropDialog([path], options=options)
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    assert dialog.mode_buttons[ASPECT_RATIO_MODE].isChecked()
+    assert dialog.image_view.resize_enabled
+    dialog.mode_buttons[ARB_MODE].click()
+
+    assert dialog.arb_options_panel.isEnabled()
+    assert not dialog.aspect_ratio_options.isEnabled()
+    assert dialog.arb_width_input.text() == "768"
+    assert dialog.arb_height_input.text() == "256"
+    assert dialog.image_view.crop_box == (0, 50, 900, 350)
+    assert dialog.image_view.aspect_ratio == pytest.approx(3)
+    assert not dialog.image_view.resize_enabled
+    assert not dialog.image_view._handles()
+
+    box = dialog.image_view.crop_box
+    target = dialog.image_view.image_rect()
+    start = QPointF(target.center().x(), target.top() + 2).toPoint()
+    end = target.center().toPoint()
+    qtbot.mousePress(dialog.image_view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(dialog.image_view, end)
+    qtbot.mouseRelease(dialog.image_view, Qt.MouseButton.LeftButton, pos=end)
+    assert dialog.image_view.crop_box == box
+
+    dialog.mode_buttons[ASPECT_RATIO_MODE].click()
+    assert dialog.image_view.resize_enabled
+    assert dialog.image_view._handles()
+
+
+def test_arb_size_buttons_change_dimensions_by_one_step(qtbot, tmp_path) -> None:
+    path = tmp_path / "wide.png"
+    Image.new("RGB", (900, 400), "blue").save(path)
+    dialog = CropDialog(
+        [path],
+        options=PreprocessOptions(
+            training_resolution=512,
+            arb_step=256,
+            arb_min_size=256,
+            arb_max_size=768,
+        ),
+    )
+    qtbot.addWidget(dialog)
+    dialog.mode_buttons[ARB_MODE].click()
+
+    dialog.arb_width_decrease_button.click()
+    assert dialog.arb_width_input.text() == "512"
+    assert dialog.arb_height_input.text() == "256"
+    assert dialog.image_view.crop_box == (50, 0, 850, 400)
+
+    dialog.arb_height_increase_button.click()
+    assert dialog.arb_width_input.text() == "512"
+    assert dialog.arb_height_input.text() == "512"
+    assert dialog.image_view.crop_box == (250, 0, 650, 400)
+
+
+def test_crop_mode_is_preserved_per_image(qtbot, tmp_path) -> None:
+    paths = [_image(tmp_path / name) for name in ("a.png", "b.png")]
+    dialog = CropDialog(paths)
+    qtbot.addWidget(dialog)
+
+    dialog.mode_buttons[ARB_MODE].click()
+    first_box = dialog.image_view.crop_box
+    dialog.next_button.click()
+    dialog.ratio_buttons["1:1"].click()
+    dialog.previous_button.click()
+
+    assert dialog.mode_buttons[ARB_MODE].isChecked()
+    assert dialog.image_view.crop_box == first_box
+    assert dialog.arb_options_panel.isEnabled()
+    assert not dialog.aspect_ratio_options.isEnabled()
 
 
 def test_invalid_custom_ratio_blocks_finish_until_fixed_or_reset(qtbot, tmp_path) -> None:

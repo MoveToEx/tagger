@@ -316,7 +316,11 @@ class DialogController:
         )
         if selection.exec() != CropSelectionDialog.DialogCode.Accepted:
             return
-        editor = CropDialog(selection.selected_paths, self.window)
+        editor = CropDialog(
+            selection.selected_paths,
+            self.window,
+            options=get_preprocess_options(self.window.settings),
+        )
         editor.exec()
         if editor.saved_paths and self.window.directory is not None:
             current = self.window._current_entry()

@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from pathlib import Path
 from typing import override
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QIntValidator
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QDialog, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton, QStyle,
-    QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QDialog, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton, QStyle,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from tagger.crop_storage import (
     CropBox, FileStamp, crop_disabled_reason, crop_image, file_stamp, load_crop_image,
 )
 from tagger.domain.models import ImageEntry
+from tagger.preprocess import PreprocessOptions, closest_bucket
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
 from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.crop import CropImageView
@@ -24,6 +25,14 @@ from tagger.ui.widgets import stabilize_widget_size
 
 
 ASPECT_RATIOS = ("Free", "Original", "1:1", "4:3", "3:4", "16:9", "9:16", "1:2", "2:1", "3:2", "2:3", "Custom")
+ASPECT_RATIO_MODE = "Aspect ratio"
+ARB_MODE = "ARB"
+
+
+def _arb_bounds(options: PreprocessOptions) -> tuple[int, int]:
+    minimum = max(1, min(options.arb_min_size, options.arb_max_size))
+    maximum = max(minimum, max(options.arb_min_size, options.arb_max_size))
+    return minimum, maximum
 
 
 def _parse_ratio(text: str) -> float:
@@ -44,16 +53,51 @@ class _CropDraft:
     box: CropBox
     original_box: CropBox
     stamp: FileStamp
+    mode: str = ASPECT_RATIO_MODE
     ratio_name: str = "Free"
     custom_text: str = "4:3"
+    arb_width_text: str | None = None
+    arb_height_text: str | None = None
 
-    def ratio(self) -> float | None:
+    def initialize_arb_bucket(self, options: PreprocessOptions) -> None:
+        if self.arb_width_text is None or self.arb_height_text is None:
+            width, height = closest_bucket(self.original_size, options)
+            self.arb_width_text = str(width)
+            self.arb_height_text = str(height)
+
+    @property
+    def original_size(self) -> tuple[int, int]:
+        left, top, right, bottom = self.original_box
+        return right - left, bottom - top
+
+    def arb_bucket(self, options: PreprocessOptions) -> tuple[int, int]:
+        self.initialize_arb_bucket(options)
+        assert self.arb_width_text is not None
+        assert self.arb_height_text is not None
+        minimum, maximum = _arb_bounds(options)
+        try:
+            width = int(self.arb_width_text)
+            height = int(self.arb_height_text)
+        except ValueError as exc:
+            raise ValueError("Bucket width and height must be whole numbers.") from exc
+        if not minimum <= width <= maximum or not minimum <= height <= maximum:
+            raise ValueError(
+                f"Bucket width and height must be from {minimum} to {maximum}."
+            )
+        return width, height
+
+    def ratio(self, options: PreprocessOptions) -> float | None:
+        if self.mode == ARB_MODE:
+            width, height = self.arb_bucket(options)
+            return width / height
         if self.ratio_name == "Free":
             return None
         if self.ratio_name == "Original":
-            return self.original_box[2] / self.original_box[3]
+            width, height = self.original_size
+            return width / height
         ratio = _parse_ratio(self.custom_text if self.ratio_name == "Custom" else self.ratio_name)
-        if not 1 / self.original_box[3] <= ratio <= self.original_box[2]:
+        width, height = self.original_size
+        if not 1 / height <= ratio <= width:
             raise ValueError("This ratio is too narrow or wide for the image dimensions.")
         return ratio
 
@@ -75,13 +119,22 @@ class CropSelectionDialog(TransparencySelectionDialog):
 
 
 class CropDialog(QDialog):
-    def __init__(self, paths: list[Path], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        paths: list[Path],
+        parent: QWidget | None = None,
+        *,
+        options: PreprocessOptions | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Crop Images")
         self.resize(1060, 720)
         self.paths = list(paths)
         self.current_index = 0
         self.saved_paths: list[Path] = []
+        self._arb_options = replace(
+            options or PreprocessOptions(), arb_enabled=True
+        )
         self._drafts: dict[Path, _CropDraft] = {}
         self._loading = False
         self._saving = False
@@ -97,14 +150,11 @@ class CropDialog(QDialog):
         self.image_view.crop_changed.connect(self._crop_changed)
 
         self.options_panel = QWidget()
-        options = QVBoxLayout(self.options_panel)
-        options.setContentsMargins(12, 0, 0, 0)
-        ratio_box = QGroupBox("Aspect ratio")
-        ratios_layout = QGridLayout(ratio_box)
-        self.ratio_group = QButtonGroup(self)
-        self.ratio_buttons: dict[str, QRadioButton] = {}
-        for index, name in enumerate(ASPECT_RATIOS):
-            button = QRadioButton(name)
+        options_layout = QVBoxLayout(self.options_panel)
+        options_layout.setContentsMargins(12, 0, 0, 0)
+
+        def radio_button(text: str) -> QRadioButton:
+            button = QRadioButton(text)
             indicator_width = button.style().pixelMetric(
                 QStyle.PixelMetric.PM_ExclusiveIndicatorWidth, None, button,
             ) - 1
@@ -117,6 +167,87 @@ class CropDialog(QDialog):
                 "}"
             )
             stabilize_widget_size(button)
+            return button
+
+        self.mode_group = QButtonGroup(self)
+        self.mode_buttons: dict[str, QRadioButton] = {}
+
+        arb_button = radio_button(ARB_MODE)
+        self.mode_group.addButton(arb_button)
+        self.mode_buttons[ARB_MODE] = arb_button
+        options_layout.addWidget(arb_button)
+
+        self.arb_options_panel = QWidget()
+        arb_layout = QVBoxLayout(self.arb_options_panel)
+        arb_layout.setContentsMargins(20, 0, 0, 6)
+        arb_layout.setSpacing(4)
+        minimum, maximum = _arb_bounds(self._arb_options)
+
+        def arb_input(name: str) -> QLineEdit:
+            field = QLineEdit(str(maximum))
+            field.setValidator(QIntValidator(minimum, maximum, field))
+            field.setAlignment(Qt.AlignmentFlag.AlignRight)
+            field.setAccessibleName(f"ARB bucket {name}")
+            stabilize_widget_size(field, minimum_width=96)
+            return field
+
+        def step_button(text: str, tooltip: str) -> QToolButton:
+            button = QToolButton()
+            button.setText(text)
+            button.setToolTip(tooltip)
+            button.setAccessibleName(tooltip)
+            button.setFixedSize(26, 26)
+            return button
+
+        self.arb_width_input = arb_input("width")
+        self.arb_height_input = arb_input("height")
+        self.arb_width_decrease_button = step_button(
+            "-", "Decrease bucket width"
+        )
+        self.arb_width_increase_button = step_button(
+            "+", "Increase bucket width"
+        )
+        self.arb_height_decrease_button = step_button(
+            "-", "Decrease bucket height"
+        )
+        self.arb_height_increase_button = step_button(
+            "+", "Increase bucket height"
+        )
+        for label, field, decrease, increase in (
+            (
+                "Width",
+                self.arb_width_input,
+                self.arb_width_decrease_button,
+                self.arb_width_increase_button,
+            ),
+            (
+                "Height",
+                self.arb_height_input,
+                self.arb_height_decrease_button,
+                self.arb_height_increase_button,
+            ),
+        ):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            row.addStretch(1)
+            row.addWidget(field)
+            row.addWidget(decrease)
+            row.addWidget(increase)
+            arb_layout.addLayout(row)
+        options_layout.addWidget(self.arb_options_panel)
+
+        aspect_ratio_button = radio_button(ASPECT_RATIO_MODE)
+        self.mode_group.addButton(aspect_ratio_button)
+        self.mode_buttons[ASPECT_RATIO_MODE] = aspect_ratio_button
+        options_layout.addWidget(aspect_ratio_button)
+
+        self.aspect_ratio_options = QWidget()
+        ratios_layout = QGridLayout(self.aspect_ratio_options)
+        ratios_layout.setContentsMargins(20, 0, 0, 0)
+        self.ratio_group = QButtonGroup(self)
+        self.ratio_buttons: dict[str, QRadioButton] = {}
+        for index, name in enumerate(ASPECT_RATIOS):
+            button = radio_button(name)
             self.ratio_group.addButton(button)
             self.ratio_buttons[name] = button
             ratios_layout.addWidget(button, index // 2, index % 2)
@@ -127,23 +258,32 @@ class CropDialog(QDialog):
         self.custom_ratio.textChanged.connect(self._ratio_changed)
         stabilize_widget_size(self.custom_ratio, minimum_width=220)
         ratios_layout.addWidget(self.custom_ratio, 6, 0, 1, 2)
-        options.addWidget(ratio_box)
+        options_layout.addWidget(self.aspect_ratio_options)
+
+        self.mode_group.buttonClicked.connect(self._mode_changed)
+        self.arb_width_input.textChanged.connect(self._arb_size_changed)
+        self.arb_height_input.textChanged.connect(self._arb_size_changed)
+        self.arb_width_decrease_button.clicked.connect(
+            lambda: self._step_arb_dimension("width", -1)
+        )
+        self.arb_width_increase_button.clicked.connect(
+            lambda: self._step_arb_dimension("width", 1)
+        )
+        self.arb_height_decrease_button.clicked.connect(
+            lambda: self._step_arb_dimension("height", -1)
+        )
+        self.arb_height_increase_button.clicked.connect(
+            lambda: self._step_arb_dimension("height", 1)
+        )
         self.ratio_error = QLabel()
         self.ratio_error.setWordWrap(True)
-        options.addWidget(self.ratio_error)
+        options_layout.addWidget(self.ratio_error)
         self.size_label = QLabel()
-        options.addWidget(self.size_label)
-        instructions = QLabel(
-            "Drag inside the crop to move it. Drag a corner to resize, or drag "
-            "outside the crop to draw a new region.\n\n"
-            "Previous and Next keep your drafts. Finish replaces the edited images."
-        )
-        instructions.setWordWrap(True)
-        options.addWidget(instructions)
+        options_layout.addWidget(self.size_label)
         self.reset_button = QPushButton("Reset Crop")
         self.reset_button.clicked.connect(self._reset)
-        options.addWidget(self.reset_button)
-        options.addStretch(1)
+        options_layout.addWidget(self.reset_button)
+        options_layout.addStretch(1)
         self.options_panel.setFixedWidth(280)
 
         row = QHBoxLayout()
@@ -209,11 +349,17 @@ class CropDialog(QDialog):
             self._drafts[path] = draft
         self._loading = True
         try:
+            draft.initialize_arb_bucket(self._arb_options)
+            assert draft.arb_width_text is not None
+            assert draft.arb_height_text is not None
+            self.mode_buttons[draft.mode].setChecked(True)
             self.ratio_buttons[draft.ratio_name].setChecked(True)
+            self.arb_width_input.setText(draft.arb_width_text)
+            self.arb_height_input.setText(draft.arb_height_text)
             self.custom_ratio.setText(draft.custom_text)
-            self.custom_ratio.setEnabled(draft.ratio_name == "Custom")
+            self._update_mode_controls(draft)
             try:
-                ratio = draft.ratio()
+                ratio = draft.ratio(self._arb_options)
                 self.ratio_error.clear()
             except ValueError as exc:
                 ratio = None
@@ -224,6 +370,42 @@ class CropDialog(QDialog):
             self._loading = False
         self._update_size_label()
         self._update_buttons()
+
+    def _update_mode_controls(self, draft: _CropDraft) -> None:
+        aspect_ratio_mode = draft.mode == ASPECT_RATIO_MODE
+        self.arb_options_panel.setEnabled(not aspect_ratio_mode)
+        self.aspect_ratio_options.setEnabled(aspect_ratio_mode)
+        self.image_view.set_resize_enabled(aspect_ratio_mode)
+        self.custom_ratio.setEnabled(
+            aspect_ratio_mode and draft.ratio_name == "Custom"
+        )
+        self._update_arb_step_buttons()
+
+    def _update_arb_step_buttons(self) -> None:
+        minimum, maximum = _arb_bounds(self._arb_options)
+        step = max(1, self._arb_options.arb_step)
+
+        def value(field: QLineEdit) -> int | None:
+            try:
+                result = int(field.text())
+            except ValueError:
+                return None
+            return result if minimum <= result <= maximum else None
+
+        width = value(self.arb_width_input)
+        height = value(self.arb_height_input)
+        self.arb_width_decrease_button.setEnabled(
+            width is not None and width - step >= minimum
+        )
+        self.arb_width_increase_button.setEnabled(
+            width is not None and width + step <= maximum
+        )
+        self.arb_height_decrease_button.setEnabled(
+            height is not None and height - step >= minimum
+        )
+        self.arb_height_increase_button.setEnabled(
+            height is not None and height + step <= maximum
+        )
 
     def _update_size_label(self) -> None:
         left, top, right, bottom = self.image_view.crop_box
@@ -236,6 +418,43 @@ class CropDialog(QDialog):
         self._update_size_label()
         self._update_buttons()
 
+    def _mode_changed(self, *_args) -> None:
+        if self._loading or not self._current_loaded:
+            return
+        button = self.mode_group.checkedButton()
+        assert button is not None
+        draft = self._drafts[self.paths[self.current_index]]
+        draft.mode = button.text()
+        self._update_mode_controls(draft)
+        self._apply_ratio(draft)
+        self._update_buttons()
+
+    def _arb_size_changed(self, *_args) -> None:
+        if self._loading or not self._current_loaded:
+            return
+        draft = self._drafts[self.paths[self.current_index]]
+        draft.arb_width_text = self.arb_width_input.text()
+        draft.arb_height_text = self.arb_height_input.text()
+        self._update_arb_step_buttons()
+        if draft.mode == ARB_MODE:
+            self._apply_ratio(draft)
+        self._update_buttons()
+
+    def _step_arb_dimension(self, dimension: str, direction: int) -> None:
+        field = (
+            self.arb_width_input
+            if dimension == "width"
+            else self.arb_height_input
+        )
+        try:
+            current = int(field.text())
+        except ValueError:
+            return
+        minimum, maximum = _arb_bounds(self._arb_options)
+        updated = current + direction * max(1, self._arb_options.arb_step)
+        if minimum <= updated <= maximum:
+            field.setText(str(updated))
+
     def _ratio_changed(self, *_args) -> None:
         if self._loading or not self._current_loaded:
             return
@@ -244,22 +463,28 @@ class CropDialog(QDialog):
         draft = self._drafts[self.paths[self.current_index]]
         draft.ratio_name = button.text()
         draft.custom_text = self.custom_ratio.text()
-        self.custom_ratio.setEnabled(draft.ratio_name == "Custom")
+        self._update_mode_controls(draft)
+        self._apply_ratio(draft)
+        self._update_buttons()
+
+    def _apply_ratio(self, draft: _CropDraft) -> None:
         try:
-            ratio = draft.ratio()
+            ratio = draft.ratio(self._arb_options)
         except ValueError as exc:
             self.ratio_error.setText(str(exc))
         else:
             self.ratio_error.clear()
             self.image_view.set_aspect_ratio(ratio)
-        self._update_buttons()
 
     def _reset(self) -> None:
         if not self._current_loaded:
             return
         draft = self._drafts[self.paths[self.current_index]]
         draft.box = draft.original_box
+        draft.mode = ASPECT_RATIO_MODE
         draft.ratio_name = "Free"
+        draft.arb_width_text = None
+        draft.arb_height_text = None
         self._load_current()
 
     def _navigate(self, delta: int) -> None:
@@ -277,13 +502,13 @@ class CropDialog(QDialog):
         invalid = False
         for draft in self._drafts.values():
             try:
-                draft.ratio()
+                draft.ratio(self._arb_options)
             except ValueError:
                 invalid = True
         self.finish_button.setEnabled(bool(self.paths) and not self._saving and not invalid)
         text = f"{len(self.dirty_paths)} crop(s) staged."
         if invalid:
-            text += " Fix invalid custom ratios to finish."
+            text += " Fix invalid crop options to finish."
         self.pending_label.setText(text)
 
     def _finish(self) -> None:
