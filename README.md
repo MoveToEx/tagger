@@ -46,80 +46,90 @@ binary tag library in `data/tag-lib/danbooru_tags.bin`. Set
 > [!NOTE]
 > It is assumed that users are training caption-based LoRAs and will randomly shuffle tags during training. Therefore, this app does not keep the tag order and stores tags in a `set[str]`. It might not work well if you're training an order-aware model.
 
-#### Add/Delete traversal
+### Scripting
+
+For scripting, there's a helper class `TagSet` that extends `set[str]` with utilities that may help:
+
+- `in` operator takes a wildcard pattern (only `*` is supported) and checks if any tag in the set matches the pattern.
+- `.matching(str)` method accepts a wildcard pattern and yields every tag in the set that matches the pattern.
+
+You can opt out from using `TagSet` and keep `set[str]` in settings dialog if you want.
+
+#### Complex filter
+
+_Tags_ > _Complex Filter_ allows you to write custom Python scripts to filter out images with complex conditions.  
+
+The script contains a `check(fn: str, tags: TagSet) -> bool` function, which accepts the file name (relative to the open folder) and the tag set of an image. Images that `check` function returns `True` will be collected into the result table.  
+Double clicking on one row will focus the image in the main window.
+
+#### Bulk operation
+
+_Tags_ > _Bulk Operation_ allows you to programmatically apply changes to images' tags.  
+
+The script contains a `process(fn: str, tags: TagSet) -> set[str]` function which returns the new list of tags.  
+After running all images through the script, the results are compared against the original ones to calculate the difference, and you need to review the differences image-by-image.
+
+
+#### Pixel transform
+
+_Image_ > _Pixel Transform_ allows you to programmatically edit image data.  
+
+The script contains a `transform(pixels: np.array) -> np.array` function that receives the image data and returns the new image data.  
+The first selected image is used to calculate preview image to help you debug.  
+Note that channel data are passed as 0-255 integers rather than floating numbers.
+
+Might be helpful for some alpha channel operations.
+
+### Image actions
+
+#### Deduplicate
+
+_Image_ > _Deduplicate_ finds similar images in the checked folders and images, and asks you to review for deletion.  
+Pairs involving images already marked for deletion are skipped.  
+
+#### Mask editor
+
+_Image_ > _Mask Editor_ allows you to edit the transparency (alpha) channel of images. Existing transparency data is dropped as it's hard to infer polygon data from 2d array.  
+
+This was initially designed for training with masked loss combined with alpha mask.  
+
+#### Crop
+
+_Image_ > _Crop_ allows you to crop the image according to ARB settings or a specific aspect ratio.  
+
+In ARB mode, it finds one bucket with the closest aspect ratio, and upscales proportionally to fit the image.  
+
+Respects global ARB settings.
+
+#### VAE preview
+
+_Image_ > _VAE Preview_ encodes the current image with VAE and decodes it back to pixels, so as to show how it looks if it were generated entirely by the model. It should 
+
+This step could be slow on some machines and is generally not necessary.  
+
+#### Grid preview
+
+_Image_ > _Grid Preview_ visualizes what an image looks like and how large a DiT token occupies when it's used for training. It scales and crops the image according your training parameters, and overlays a grid over the current image so each cell represents a DiT token.  
+
+Try to make your training target take more cells so the model understands it better.  
+
+### Tag editing
+
+#### Traversal
 
 _Tags_ > _Add Tags_/_Delete Tags_ allows you to add tags to or delete tags from open folders and decide on a one-by-one basis.   
+_Tags_ > _Toggle Tags_ combines the two.  
 
 Adding/Deleting tags will ask you for the image to act on and a list of tags. When traversing, you need to decide on which one to add or delete for each image-tag pair. Tags already present/absent will be ignored. 
 
 Decisions are committed only when you click on finish button, and are saved to memory whenever it is changed (i.e. whenever you toggle a tag).  
 You can use <kbd>Space</kbd> to toggle a tag, <kbd>↑</kbd>/<kbd>↓</kbd> to select between tags, <kbd>←</kbd>/<kbd>→</kbd>/<kbd>Enter</kbd> to navigate between images (this is purely navigational and does not affect in-memory decision store), and <kbd>A</kbd> to select/deselect all tags.
 
-#### Complex filter
-
-_Tags_ > _Complex Filter_ allows you to write custom Python scripts to filter out images with complex conditions.  
-
-The script contains a `check(fn: str, tags: TagSet) -> bool` function, which accepts the file name (relative to the open folder) and the tag set of an image. `TagSet` supports `*` wildcard patterns in membership checks, such as `"red*" in tags`, and `tags.matching("*hair*")` yields matching tags with their wildcard captures. The scripting setting can switch back to an exact `set[str]` parameter. Images that the function returns `True` will be collected into a result table. Double clicking on one row will focus the image in the main window.
-
-#### Bulk operation
-
-_Tags_ > _Bulk Operation_ allows you to programmatically apply changes to images' tags.  
-
-The script contains a `process(fn: str, tags: TagSet) -> set[str]` function which returns the new list of tags. The `tags` parameter follows the Complex Filter scripting setting, so it can be a wildcard-aware `TagSet` or an exact `set[str]`. After running all images through the script, the results are compared against the original ones to calculate the difference, and you need to review the differences image-by-image.
-
-#### Tag review
+#### Review
 
 _Tags_ > _Review Tags_ allows you to thoroughly review tags within a folder and determine whether they should be deleted one-by-one.  
 
 Decisions are stored in memory and are committed only when the revision finishes.  
-
-#### Deduplicate
-
-_Image_ > _Deduplicate_ finds similar images in the checked folders and images.
-Choose a perceptual-hash distance threshold: Exact (0), Very similar (1),
-Similar (2), or Speculative (4). Exact compares perceptual hashes, not file bytes.
-
-Review each pair side by side and choose Keep Left, Keep Right, or Keep Both.
-Previous and Next only navigate; saved choices can be revisited and changed.
-Pairs involving images already marked for deletion are skipped. Finish is
-available at any point during review and moves marked images and their tag files
-to the system Recycle Bin, keeping undecided images. Cancel discards the choices
-without deleting files.
-
-To permanently delete duplicates instead, enable _Deduplicate_ under
-_Settings_ > _General_ > _Behavior_ > _Use unlink for..._.
-
-The catalog click-and-hold behavior can also be set under _Settings_ >
-_General_ > _Behavior_: choose _Drag and drop_ to move images between folders,
-or _Navigate_ to change the selected image without moving files.
-
-#### Mask editor
-
-_Image_ > _Mask Editor_ opens the folder/image picker. JPEG files are disabled
-because they cannot store alpha. Continue shows a warning that saving replaces
-existing alpha masks on edited images.
-Right-click an image and choose _Send to_ > _Mask Editor_ to preselect that image.
-
-Drag to draw a rectangle, or click polygon vertices and press Enter, double-click,
-or click the first vertex to finish. Esc cancels an unfinished shape. Each region
-gets a contrasting color and an editable alpha from 0 (transparent) to 1 (opaque).
-Hover a mask in the list to highlight it at 85% opacity. Colored overlays use
-15% opacity; use the eye button to preview actual transparency. Base alpha sets
-the opacity of areas outside all masks and defaults to 1. Drag a mask's handle
-to reorder the list; masks at the top take priority over masks below them.
-Select a mask in the list to show its tight bounding rectangle. Drag a corner
-or edge to resize it; polygon vertices scale with the rectangle. Esc cancels
-an active resize, or clears the selection when no drawing or resize is active.
-The pointer tool selects the topmost mask under the cursor; clicking empty space
-clears the selection. The move tool drags a mask within the image boundaries,
-preserving its shape. Select a covered mask in the list to move it at overlaps.
-Esc cancels an active move.
-New mask alpha sets the initial alpha for subsequently drawn shapes and defaults
-to 0. It stays selected when navigating between images.
-
-Previous/Next retain each image's masks in memory. Save Changes writes edited
-images in place, rounding alpha to 0–255. PNG, WebP, and single-frame TIFF are
-supported.
 
 #### AI tagging
 
@@ -137,18 +147,16 @@ take longer each time inference is run.
 
 After inference completes, you are supposed to check tags one by one. You can use shortcuts from the traversal window here.
 
-#### VAE preview
+#### Correlation analysis
 
-_Image_ > _VAE Preview_ encodes the current image with Qwen Image VAE and
-decodes it back to pixels. Download _Qwen Image VAE_ from _Settings_ > _Models_
-first. The model list identifies tagging and VAE models in its _Type_ column.
+_Tags_ > _Correlation Analysis_ takes a tag and finds other tags that are possibly correlated to it.  
+For a given tag `s` and every other tag `t`, it calculates the following:
 
-The preview starts on the image selected in the main window. Move the pointer
-over the preview to compare the decoded image above the pointer with the
-original below it. The view supports drag-to-pan, zoom controls, the configured
-mouse-wheel behavior, Left/Right and browser Back/Forward keys, and mouse side
-buttons. VAE loading and processing run in a separate process so PyTorch, the
-model, and GPU memory are released when the dialog closes.
+$$
+\frac{\text{images with both }s\text{ and t}}{\text{images with }t}
+$$
+
+For concept LoRAs, try to avoid correlating your activation tag with an unrelated tag.
 
 ## Code layout
 
