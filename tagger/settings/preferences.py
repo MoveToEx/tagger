@@ -36,6 +36,8 @@ USE_UNLINK_FOR_DEDUPLICATE_SETTING = "general/use_unlink_for_deduplicate"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 SCRIPTING_TAGS_TYPE_SETTING = "scripting/tags_type"
+PROBING_BUILTIN_RULES_SETTING = "probing/builtin_rules"
+PROBING_CUSTOM_RULES_SETTING = "probing/custom_rules"
 SIMULATOR_TRAINING_RESOLUTION_SETTING = (
     "simulator/preprocess/training_resolution"
 )

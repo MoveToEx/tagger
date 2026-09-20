@@ -581,7 +581,11 @@ def test_settings_tree_stages_proxy_until_applied(qtbot, tmp_path: Path) -> None
     ]
     assert [
         item.text(0) for item in top_level_items if item is not None
-    ] == ["General", "Models", "Grid", "Autocomplete", "Network"]
+    ] == ["General", "Models", "Grid", "Tag", "Network"]
+    assert dialog.tag_item.childCount() == 2
+    assert dialog.tag_item.child(0).text(0) == "Autocomplete"
+    assert dialog.tag_item.child(1).text(0) == "Probing"
+    assert dialog.tag_item.isExpanded()
     assert dialog.network_item.childCount() == 1
     assert dialog.network_item.child(0).text(0) == "Proxy"
     assert dialog.network_item.isExpanded()

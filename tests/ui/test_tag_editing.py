@@ -20,6 +20,39 @@ import tagger.ui.main_window.window as main_window_module
 from .helpers import create_png
 
 
+def test_tags_menu_labels_and_order(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    tags_menu = next(
+        menu
+        for menu in window.menuBar().findChildren(QMenu)
+        if menu.title() == "&Tags"
+    )
+
+    assert [
+        "<separator>" if action.isSeparator() else action.text()
+        for action in tags_menu.actions()
+    ] == [
+        "Global Search...",
+        "<separator>",
+        "Correlation Analysis...",
+        "Probe...",
+        "<separator>",
+        "Complex Filter...",
+        "Bulk Operation...",
+        "<separator>",
+        "AI Tagging...",
+        "<separator>",
+        "Review...",
+        "Add Tags...",
+        "Delete Tags...",
+        "Toggle Tags...",
+        "<separator>",
+        "Normalize...",
+    ]
+
+
 def test_main_window_loads_folder_and_edits_current_tags(qtbot, tmp_path: Path) -> None:
     create_png(tmp_path / "sample.png")
     (tmp_path / "sample.txt").write_text("dog, cat\n", encoding="utf-8")

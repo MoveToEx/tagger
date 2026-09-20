@@ -32,6 +32,11 @@ from tagger.ai_tagging.dependencies import (
 from tagger.ai_tagging.model_dialog import ModelManagementDialog
 from tagger.paths import get_tag_library_path
 from tagger.preprocess import GRID_TYPES, PreprocessOptions
+from tagger.probing import (
+    ProbeConfiguration,
+    get_probe_configuration,
+    save_probe_configuration,
+)
 from tagger.settings.dialog_helpers import _format_byte_size, _stabilize_checkbox
 from tagger.settings.preferences import (
     CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
@@ -70,6 +75,7 @@ from tagger.settings.preferences import (
     get_use_unlink,
 )
 from tagger.settings.proxy import _proxy_preferences, _resolved_proxy
+from tagger.settings.probing import ProbingSettingsPage
 from tagger.settings.store import JsonSettings, create_app_settings
 from tagger.tag_library.download_dialog import DownloadTagsDialog
 from tagger.tag_library.format import get_tag_library_file_info
@@ -148,6 +154,9 @@ class SettingsDialog(QDialog):
         self._applied_scripting_tags_type = get_scripting_tags_type(
             self.settings
         )
+        self._applied_probe_configuration = get_probe_configuration(
+            self.settings
+        )
         self._applied_open_recent_folder_on_startup = cast(
             bool,
             self.settings.value(
@@ -187,12 +196,19 @@ class SettingsDialog(QDialog):
         self.tag_library_dialog: DownloadTagsDialog | None = None
         self.autocomplete_page = self._create_autocomplete_page()
         self.scripting_page = self._create_scripting_page()
+        self.probing_page = ProbingSettingsPage(
+            self._applied_probe_configuration,
+            use_tag_set=lambda: (
+                self._scripting_tags_type() == SCRIPTING_TAG_SET
+            ),
+        )
         self.proxy_page = self._create_proxy_page()
         self.pages.addWidget(self.general_page)
         self.pages.addWidget(self.models_page)
         self.pages.addWidget(self.grid_page)
         self.pages.addWidget(self.autocomplete_page)
         self.pages.addWidget(self.scripting_page)
+        self.pages.addWidget(self.probing_page)
         self.pages.addWidget(self.proxy_page)
 
         self.general_item = self._add_navigation_item(
@@ -204,13 +220,22 @@ class SettingsDialog(QDialog):
         self.grid_item = self._add_navigation_item(
             "Grid", self.grid_page
         )
-        self.autocomplete_item = self._add_navigation_item(
-            "Autocomplete", self.autocomplete_page
-        )
         self.scripting_item = self._add_navigation_item(
             "Scripting", self.scripting_page, parent=self.general_item
         )
         self.general_item.setExpanded(True)
+        self.tag_item = QTreeWidgetItem(["Tag"])
+        self.tag_item.setFlags(
+            self.tag_item.flags() & ~Qt.ItemFlag.ItemIsSelectable
+        )
+        self.navigation_tree.addTopLevelItem(self.tag_item)
+        self.autocomplete_item = self._add_navigation_item(
+            "Autocomplete", self.autocomplete_page, parent=self.tag_item
+        )
+        self.probing_item = self._add_navigation_item(
+            "Probing", self.probing_page, parent=self.tag_item
+        )
+        self.tag_item.setExpanded(True)
         self.network_item = QTreeWidgetItem(["Network"])
         self.network_item.setFlags(
             self.network_item.flags() & ~Qt.ItemFlag.ItemIsSelectable
@@ -223,6 +248,7 @@ class SettingsDialog(QDialog):
         self.navigation_tree.currentItemChanged.connect(
             self._navigation_changed
         )
+        self.probing_page.changed.connect(self._settings_changed)
         self.navigation_tree.setCurrentItem(self.general_item)
 
         content = QHBoxLayout()
@@ -790,6 +816,8 @@ class SettingsDialog(QDialog):
             or self._transform_options() != self._applied_transform_options
             or self._scripting_tags_type()
             != self._applied_scripting_tags_type
+            or self._probe_configuration()
+            != self._applied_probe_configuration
             or self._proxy_preferences()
             != (self._applied_proxy_mode, self._applied_proxy_url)
         )
@@ -844,6 +872,9 @@ class SettingsDialog(QDialog):
         tags_type = self.scripting_tags_input.currentData()
         return tags_type if isinstance(tags_type, str) else SCRIPTING_TAG_SET
 
+    def _probe_configuration(self) -> ProbeConfiguration:
+        return self.probing_page.configuration()
+
     def _proxy_preferences(self) -> tuple[str, str]:
         if self.system_proxy_radio.isChecked():
             mode = SYSTEM_PROXY
@@ -866,6 +897,7 @@ class SettingsDialog(QDialog):
         parentheses = self.parentheses_checkbox.isChecked()
         use_unlink_options = self._use_unlink_options()
         scripting_tags_type = self._scripting_tags_type()
+        probe_configuration = self._probe_configuration()
         proxy_mode, proxy_url = self._proxy_preferences()
         proxy = _resolved_proxy(proxy_mode, proxy_url)
         self.settings.setValue(SCROLLING_BEHAVIOR_SETTING, scrolling_behavior)
@@ -922,6 +954,9 @@ class SettingsDialog(QDialog):
         self.settings.setValue(
             SCRIPTING_TAGS_TYPE_SETTING, scripting_tags_type
         )
+        save_probe_configuration(
+            self.settings, probe_configuration, sync=False
+        )
         self.settings.setValue(PROXY_MODE_SETTING, proxy_mode)
         self.settings.setValue(PROXY_SETTING, proxy_url)
         self.settings.sync()
@@ -950,6 +985,7 @@ class SettingsDialog(QDialog):
         self._applied_transform_options = (underscores, parentheses)
         self._applied_use_unlink_options = use_unlink_options
         self._applied_scripting_tags_type = scripting_tags_type
+        self._applied_probe_configuration = probe_configuration
         self._applied_proxy_mode = proxy_mode
         self._applied_proxy_url = proxy_url
         self.apply_button.setEnabled(False)

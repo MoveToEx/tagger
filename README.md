@@ -46,6 +46,9 @@ binary tag library in `data/tag-lib/danbooru_tags.bin`. Set
 > [!NOTE]
 > It is assumed that users are training caption-based LoRAs and will randomly shuffle tags during training. Therefore, this app does not keep the tag order and stores tags in a `set[str]`. It might not work well if you're training an order-aware model.
 
+> [!WARNING]
+> Make backups before using these when necessary. All of these actions are irreversible.
+
 ### Scripting
 
 For scripting, there's a helper class `TagSet` that extends `set[str]` with utilities that may help:
@@ -127,9 +130,16 @@ You can use <kbd>Space</kbd> to toggle a tag, <kbd>↑</kbd>/<kbd>↓</kbd> to s
 
 #### Review
 
-_Tags_ > _Review Tags_ allows you to thoroughly review tags within a folder and determine whether they should be deleted one-by-one.  
+_Tags_ > _Review_ allows you to thoroughly review tags within a folder and determine whether they should be deleted one-by-one.  
 
 Decisions are stored in memory and are committed only when the revision finishes.  
+
+#### Probe
+
+_Tags_ > _Probe_ checks all images whether they pass all builtin and user-defined rules and reports them when issues are found.  
+You can create your rules in the settings page. 
+
+Currently, builtin rules include case divergence, separator divergence, character count tag conflict and artist conflict.
 
 #### AI tagging
 

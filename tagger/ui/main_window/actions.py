@@ -82,7 +82,7 @@ class WindowActions:
         self.exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         self.exit_action.triggered.connect(self.window.close)
 
-        self.global_search_action = QAction("Global Tag Search...", self.window)
+        self.global_search_action = QAction("Global Search...", self.window)
         self.global_search_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
         self.global_search_action.triggered.connect(self.window.dialogs._open_global_search)
 
@@ -93,7 +93,12 @@ class WindowActions:
             self.window.dialogs._open_correlation_analysis
         )
 
-        self.review_action = QAction("Review Tags...", self.window)
+        self.probe_action = QAction("Probe...", self.window)
+        self.probe_action.triggered.connect(
+            self.window.dialogs._open_probe
+        )
+
+        self.review_action = QAction("Review...", self.window)
         self.review_action.setShortcut(QKeySequence("Ctrl+R"))
         self.review_action.triggered.connect(self.window.dialogs._open_review)
 
@@ -191,7 +196,7 @@ class WindowActions:
             )
             self.folder_tag_actions[operation] = action
 
-        self.normalize_action = QAction("Normalize All Tags...", self.window)
+        self.normalize_action = QAction("Normalize...", self.window)
         self.normalize_action.triggered.connect(self.window.tags._normalize_all_tags)
 
         self.fit_action = QAction("Fit to Window", self.window)
@@ -274,13 +279,16 @@ class WindowActions:
         image_menu.addAction(self.mask_editor_action)
         tags_menu = self.window.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
+        tags_menu.addSeparator()
         tags_menu.addAction(self.correlation_analysis_action)
-        tags_menu.addAction(self.review_action)
+        tags_menu.addAction(self.probe_action)
+        tags_menu.addSeparator()
         tags_menu.addAction(self.complex_filter_action)
         tags_menu.addAction(self.bulk_operation_action)
         tags_menu.addSeparator()
         tags_menu.addAction(self.ai_tagging_action)
         tags_menu.addSeparator()
+        tags_menu.addAction(self.review_action)
         for action in self.folder_tag_actions.values():
             tags_menu.addAction(action)
         tags_menu.addSeparator()
@@ -347,6 +355,11 @@ class WindowActions:
         self.window.search_input.setEnabled(count > 0)
         self.global_search_action.setEnabled(count > 0)
         self.correlation_analysis_action.setEnabled(count > 0)
+        self.probe_action.setEnabled(
+            count > 0
+            and self.window.dialogs._probe_progress_dialog is None
+            and self.window.dialogs._probe_dialog is None
+        )
         self.delete_filter_action.setEnabled(count > 0)
         self.deduplicate_action.setEnabled(count >= 2)
         self.transform_images_action.setEnabled(count > 0)

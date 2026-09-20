@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QMessageBox
@@ -15,6 +15,11 @@ from tagger.ai_tagging.dependencies import (
 from tagger.ai_tagging.dialog import AITaggingDialog
 from tagger.ai_tagging.models import QWEN_IMAGE_VAE
 from tagger.domain.models import TagOperation
+from tagger.probing import (
+    ProbeResult,
+    ProbeRuleError,
+    get_enabled_probe_rules,
+)
 from tagger.settings.dialog import SettingsDialog
 from tagger.settings.preferences import (
     USE_UNLINK_FOR_DEDUPLICATE_SETTING,
@@ -41,6 +46,7 @@ from tagger.ui.dialogs.grid_preview import GridPreviewDialog
 from tagger.ui.dialogs.traversal import TraversalDialog
 from tagger.ui.dialogs.image_transform import ImageTransformDialog, ConvertProgressDialog
 from tagger.ui.dialogs.pixel_transform import PixelTransformDialog
+from tagger.ui.dialogs.probe import ProbeDialog, ProbeProgressDialog
 from tagger.ui.dialogs.transparency import (
     TransparencyProgressDialog,
     TransparencySelectionDialog,
@@ -58,6 +64,8 @@ class DialogController:
     def __init__(self, window: MainWindow) -> None:
         self.window = window
         self._complex_filter_dialog: ComplexFilterDialog | None = None
+        self._probe_progress_dialog: ProbeProgressDialog | None = None
+        self._probe_dialog: ProbeDialog | None = None
 
     def _open_global_search(self, *, initial_pattern: str = "") -> None:
         if not self.window.catalog.entries:
@@ -203,6 +211,86 @@ class DialogController:
                 preferred_image=current.image_path if current else None,
                 show_issues=False,
             )
+
+    def _open_probe(self) -> None:
+        if not self.window.catalog.entries:
+            return
+        if self._probe_progress_dialog is not None:
+            self._probe_progress_dialog.show()
+            self._probe_progress_dialog.raise_()
+            self._probe_progress_dialog.activateWindow()
+            return
+        if self._probe_dialog is not None:
+            self._probe_dialog.show()
+            self._probe_dialog.raise_()
+            self._probe_dialog.activateWindow()
+            return
+        try:
+            rules = get_enabled_probe_rules(self.window.settings)
+        except ProbeRuleError as exc:
+            QMessageBox.critical(
+                self.window,
+                "Could Not Load Probing Rules",
+                str(exc),
+            )
+            return
+        if not rules:
+            QMessageBox.information(
+                self.window,
+                "No Probing Rules Enabled",
+                "Enable a built-in or user rule in Settings > Tag > Probing.",
+            )
+            return
+
+        dialog = ProbeProgressDialog(
+            list(self.window.catalog.entries),
+            rules,
+            self.window,
+            root_directory=self.window.directory,
+            use_tag_set=get_scripting_use_tag_set(self.window.settings),
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.completed.connect(self._probe_completed)
+        dialog.failed.connect(self._probe_failed)
+        self._probe_progress_dialog = dialog
+        self.window.commands._update_action_states()
+        dialog.show()
+        dialog.start()
+
+    def _probe_completed(self, value: object) -> None:
+        self._probe_progress_dialog = None
+        results = cast(list[ProbeResult], value)
+        if not results:
+            self.window.commands._update_action_states()
+            QMessageBox.information(
+                self.window,
+                "No Issues Found",
+                "No tag issues were found.",
+            )
+            return
+        dialog = ProbeDialog(
+            results,
+            self.window,
+            root_directory=self.window.directory,
+            scanned_count=len(self.window.catalog.entries),
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setWindowFlag(Qt.WindowType.Window, True)
+        dialog.setModal(False)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.image_activated.connect(self._select_image_from_probe)
+        dialog.finished.connect(self._probe_finished)
+        dialog.destroyed.connect(self._probe_destroyed)
+        self._probe_dialog = dialog
+        self.window.commands._update_action_states()
+        dialog.show()
+
+    def _probe_failed(self, message: str) -> None:
+        self._probe_progress_dialog = None
+        self.window.commands._update_action_states()
+        QMessageBox.critical(
+            self.window, "Could Not Probe Tags", message
+        )
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(
@@ -432,7 +520,18 @@ class DialogController:
     def _complex_filter_destroyed(self, _object: QObject) -> None:
         self._complex_filter_dialog = None
 
+    def _probe_destroyed(self, _object: QObject) -> None:
+        self._probe_dialog = None
+
+    def _probe_finished(self, _result: int) -> None:
+        self._probe_dialog = None
+        self.window.commands._update_action_states()
+
     def _select_image_from_complex_filter(self, image_path: Path) -> None:
+        row = self.window.catalog.row_for_image(image_path)
+        self.window._select_optional_row(row)
+
+    def _select_image_from_probe(self, image_path: Path) -> None:
         row = self.window.catalog.row_for_image(image_path)
         self.window._select_optional_row(row)
 
