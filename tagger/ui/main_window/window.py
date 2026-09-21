@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         )
         self.image_list.setMinimumWidth(220)
         self.image_list.setHeaderHidden(True)
+        self.image_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.image_list.setUniformRowHeights(True)
         self.image_list.setAnimated(True)
         self.image_list.setContextMenuPolicy(

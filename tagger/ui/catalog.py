@@ -21,11 +21,19 @@ from PySide6.QtGui import (
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
+    QFontMetrics,
     QStandardItem,
     QStandardItemModel,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QTreeView
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QStyle,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
+    QTreeView,
+)
 
 from tagger.domain.models import ImageEntry
 from tagger.settings.preferences import (
@@ -287,6 +295,58 @@ class ImageCatalogModel(QStandardItemModel):
         item.setData(group, self.GroupRole)
 
 
+class _ImageCatalogDelegate(QStyledItemDelegate):
+    """Keep image tag counts visible while eliding only their filenames."""
+
+    RIGHT_TEXT_MARGIN = 4
+
+    @override
+    def paint(self, painter, option, index) -> None:
+        entry = index.data(ImageCatalogModel.EntryRole)
+        if not isinstance(entry, ImageEntry):
+            super().paint(painter, option, index)
+            return
+
+        item_option = QStyleOptionViewItem(option)
+        self.initStyleOption(item_option, index)
+        style = (
+            item_option.widget.style()
+            if item_option.widget is not None
+            else QApplication.style()
+        )
+        text_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemText,
+            item_option,
+            item_option.widget,
+        )
+        suffix = " [read-only]" if not entry.editable else ""
+        count_text = f"  ({len(entry.tags)}){suffix}"
+        metrics = QFontMetrics(item_option.font)
+        filename_width = max(
+            0,
+            text_rect.width()
+            - metrics.horizontalAdvance(count_text)
+            - self.RIGHT_TEXT_MARGIN,
+        )
+        filename = (
+            metrics.elidedText(
+                entry.image_path.name,
+                Qt.TextElideMode.ElideRight,
+                filename_width,
+            )
+            if filename_width >= metrics.horizontalAdvance("...")
+            else ""
+        )
+        item_option.text = filename + count_text
+        item_option.textElideMode = Qt.TextElideMode.ElideNone
+        style.drawControl(
+            QStyle.ControlElement.CE_ItemViewItem,
+            item_option,
+            painter,
+            item_option.widget,
+        )
+
+
 class _CatalogDragWheelFilter(QObject):
     """Route wheel events back to a catalog during Qt's native drag loop."""
 
@@ -334,6 +394,7 @@ class ImageCatalogView(QTreeView):
         self._edge_scroll_timer.setInterval(self.EDGE_SCROLL_INTERVAL)
         self._edge_scroll_timer.timeout.connect(self._scroll_at_drag_edge)
         self._drag_wheel_filter = _CatalogDragWheelFilter(self)
+        self.setItemDelegate(_ImageCatalogDelegate(self))
         application = QApplication.instance()
         if application is not None:
             application.installEventFilter(self._drag_wheel_filter)

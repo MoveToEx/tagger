@@ -260,6 +260,13 @@ def test_image_list_groups_images_by_subfolder(qtbot, tmp_path: Path) -> None:
     assert not window.commands.next_action.isEnabled()
 
 
+def test_image_catalog_elides_filename_before_tag_count(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.image_list.textElideMode() == Qt.TextElideMode.ElideRight
+
+
 def test_image_catalog_drag_moves_image_and_sidecar_into_folder(
     qtbot, tmp_path: Path
 ) -> None:
