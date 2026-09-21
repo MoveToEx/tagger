@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image
 import pytest
 
 from tagger.domain.masks import MaskRegion
-from tagger.mask_storage import load_mask_image, render_masks, save_masks
+from tagger.mask_storage import (
+    load_mask_image,
+    render_masks,
+    resolve_outset_width,
+    save_masks,
+)
 
 
 RECTANGLE = ((1.0, 1.0), (6.0, 1.0), (6.0, 6.0), (1.0, 6.0))
@@ -70,6 +76,46 @@ def test_base_alpha_applies_only_outside_masks(base_alpha: float, expected: int)
     )
     assert result.getpixel((0, 0)) == (20, 40, 60, expected)
     assert result.getpixel((2, 2)) == (20, 40, 60, 128)
+
+
+def test_outset_styles_keep_constant_and_curve_fadeout_values() -> None:
+    image = Image.new("RGB", (30, 20), (20, 40, 60))
+    points = ((10, 5), (20, 5), (20, 15), (10, 15))
+    constant = render_masks(
+        image,
+        [MaskRegion(
+            points, alpha=1.0, outset_style="constant",
+            destination_alpha=0.2, outset_width=4.0,
+        )],
+    )
+    linear = render_masks(
+        image,
+        [MaskRegion(
+            points, alpha=1.0, outset_style="linear",
+            destination_alpha=0.2, outset_width=4.0,
+        )],
+    )
+    quadratic = render_masks(
+        image,
+        [MaskRegion(
+            points, alpha=1.0, outset_style="quadratic",
+            destination_alpha=0.2, outset_width=4.0,
+        )],
+    )
+    assert constant.getchannel("A").getpixel((8, 10)) == 51
+    assert linear.getchannel("A").getpixel((8, 10)) == 153
+    assert quadratic.getchannel("A").getpixel((8, 10)) == 102
+    assert constant.getchannel("A").getpixel((10, 10)) == 255
+
+
+def test_outset_width_units_resolve_against_image_or_mask_size() -> None:
+    points = ((10, 10), (30, 10), (30, 50), (10, 50))
+    mask = MaskRegion(
+        points, outset_width=10.0, outset_width_unit="image_percent"
+    )
+    assert resolve_outset_width(mask, (200, 100)) == 10.0
+    mask = replace(mask, outset_width_unit="mask_percent")
+    assert resolve_outset_width(mask, (200, 100)) == 2.0
 
 
 @pytest.mark.parametrize("suffix", ["png", "webp", "tiff"])

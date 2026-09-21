@@ -15,6 +15,18 @@ from tagger.domain.masks import MaskRegion
 SUPPORTED_MASK_FORMATS = {"PNG", "WEBP", "TIFF"}
 
 
+def resolve_outset_width(
+    mask: MaskRegion, image_size: tuple[int, int]
+) -> float:
+    """Convert a mask's configured outset width into image pixels."""
+    if mask.outset_width_unit == "px":
+        return mask.outset_width
+    if mask.outset_width_unit == "image_percent":
+        return mask.outset_width * min(image_size) / 100.0
+    left, top, right, bottom = mask.bounds
+    return mask.outset_width * min(right - left, bottom - top) / 100.0
+
+
 def mask_editing_disabled_reason(path: Path) -> str | None:
     try:
         with Image.open(path) as image:
@@ -51,7 +63,8 @@ def render_masks(
     alpha = Image.new("L", image.size, round(base_alpha * 255))
     draw = ImageDraw.Draw(alpha)
     for mask in reversed(masks):
-        if mask.fadeout_mode == "none" or mask.fadeout_width <= 0:
+        outset_width = resolve_outset_width(mask, image.size)
+        if mask.outset_style == "none" or outset_width <= 0:
             draw.polygon(mask.points, fill=mask.alpha_byte)
             continue
         # Rasterize a signed distance to the polygon boundary.  This keeps
@@ -70,13 +83,26 @@ def render_masks(
             t = np.clip(((xx - start[0]) * vx + (yy - start[1]) * vy) / denom, 0.0, 1.0)
             distances = np.minimum(distances, np.hypot(xx - (start[0] + t * vx), yy - (start[1] + t * vy)))
         signed = np.where(inside, distances, -distances)
-        fade_width = mask.fadeout_width
-        if mask.fadeout_mode == "outside":
+        fade_width = outset_width
+        if mask.outset_style == "constant":
+            # The polygon keeps its mask alpha; only the outside extension
+            # receives the static destination alpha.
+            draw.polygon(mask.points, fill=mask.alpha_byte)
+            covered = (~inside) & (signed >= -fade_width)
+            alpha.paste(
+                Image.new("L", (width, height), round(mask.destination_alpha * 255)),
+                (0, 0),
+                Image.fromarray(covered.astype(np.uint8) * 255, mode="L"),
+            )
+            continue
+        if mask.outset_style in {"linear", "quadratic"}:
             factor = np.clip((signed + fade_width) / fade_width, 0.0, 1.0)
+            if mask.outset_style == "quadratic":
+                factor = factor ** 2
         else:
-            factor = np.where(inside, np.clip((fade_width - signed) / fade_width, 0.0, 1.0), 0.0)
+            raise ValueError(f"Unsupported outset style: {mask.outset_style}")
         values = np.round((mask.destination_alpha + (mask.alpha - mask.destination_alpha) * factor) * 255).astype(np.uint8)
-        covered = inside if mask.fadeout_mode == "inside" else (signed >= -fade_width)
+        covered = signed >= -fade_width
         alpha.paste(Image.fromarray(values, mode="L"), (0, 0), Image.fromarray(covered.astype(np.uint8) * 255, mode="L"))
     result.putalpha(alpha)
     return result

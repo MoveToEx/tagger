@@ -11,19 +11,26 @@ class MaskRegion:
     points: tuple[tuple[float, float], ...]
     alpha: float = 0.0
     color: str = "#e64b60"
-    fadeout_mode: str = "none"
+    outset_style: str = "none"
     destination_alpha: float = 0.0
-    fadeout_width: float = 0.0
+    outset_width: float = 0.0
+    outset_width_unit: str = "px"
 
     def __post_init__(self) -> None:
         if not isfinite(self.alpha) or not 0.0 <= self.alpha <= 1.0:
             raise ValueError("Alpha must be between 0 and 1.")
-        if self.fadeout_mode not in {"none", "outside", "inside"}:
-            raise ValueError("Fadeout mode must be none, outside, or inside.")
+        if self.outset_style not in {"none", "constant", "linear", "quadratic"}:
+            raise ValueError(
+                "Outset style must be none, constant, linear, or quadratic."
+            )
         if not isfinite(self.destination_alpha) or not 0.0 <= self.destination_alpha <= 1.0:
             raise ValueError("Destination alpha must be between 0 and 1.")
-        if not isfinite(self.fadeout_width) or self.fadeout_width < 0.0:
-            raise ValueError("Fadeout width must be non-negative.")
+        if not isfinite(self.outset_width) or self.outset_width < 0.0:
+            raise ValueError("Outset width must be non-negative.")
+        if self.outset_width_unit not in {"px", "image_percent", "mask_percent"}:
+            raise ValueError(
+                "Outset width unit must be px, image_percent, or mask_percent."
+            )
         if len(set(self.points)) < 3 or any(
             not isfinite(value) for point in self.points for value in point
         ):

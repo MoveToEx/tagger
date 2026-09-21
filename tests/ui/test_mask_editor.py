@@ -7,7 +7,7 @@ from PIL import Image
 import pytest
 from PySide6.QtCore import QEvent, QModelIndex, QPoint, QPointF, QTimer, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox
 
 from tagger.domain.models import ImageEntry
 from tagger.ui.dialogs.mask_editor import (
@@ -16,6 +16,7 @@ from tagger.ui.dialogs.mask_editor import (
     MaskRow,
     MaskSaveProgressDialog,
     MaskSelectionDialog,
+    OutsetOptionsDialog,
 )
 import tagger.ui.dialogs.mask_editor as mask_editor_module
 import tagger.ui.main_window.dialogs as dialogs_module
@@ -86,7 +87,7 @@ def test_move_tool_translates_without_resizing_and_saves_preview(qtbot, tmp_path
     dialog = MaskEditorDialog([path])
     qtbot.addWidget(dialog)
     dialog.show()
-    dialog.new_mask_alpha_input.setValue(0.5)
+    dialog.new_mask_alpha_inputs[0].setValue(0.5)
     dialog._add_mask(points)
     original = dialog.current_masks[0]
     dialog.mask_list.setCurrentRow(-1)
@@ -192,7 +193,7 @@ def test_resize_polygon_from_each_bounding_box_handle(qtbot, tmp_path, start, en
     dialog = MaskEditorDialog([_image(tmp_path / "a.png")])
     qtbot.addWidget(dialog)
     dialog.show()
-    dialog.new_mask_alpha_input.setValue(0.4)
+    dialog.new_mask_alpha_inputs[0].setValue(0.4)
     dialog._add_mask(((20, 25), (40, 15), (60, 50), (30, 45)))
     original = dialog.current_masks[0]
     source_bytes = dialog.current_path.read_bytes()
@@ -223,7 +224,7 @@ def test_resize_rectangle_preview_and_saved_alpha_match(qtbot, tmp_path) -> None
     dialog = MaskEditorDialog([path])
     qtbot.addWidget(dialog)
     dialog.show()
-    dialog.new_mask_alpha_input.setValue(0.5)
+    dialog.new_mask_alpha_inputs[0].setValue(0.5)
     dialog._add_mask(((20, 15), (60, 15), (60, 50), (20, 50)))
     dialog.actual_opacity_button.click()
     start = _mask_view_point(dialog, 60, 50)
@@ -403,17 +404,17 @@ def test_new_mask_alpha_applies_to_new_shapes_and_persists_during_navigation(qtb
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.image_view.width() > 320)
-    assert dialog.new_mask_alpha_input.value() == 0.0
-    assert_stable_widget_size(dialog.new_mask_alpha_input, minimum_width=88, vertical_padding=2)
-    dialog.new_mask_alpha_input.setValue(0.35)
+    assert dialog.new_mask_alpha_inputs[0].value() == 0.0
+    assert_stable_widget_size(dialog.new_mask_alpha_inputs[0], minimum_width=88, vertical_padding=2)
+    dialog.new_mask_alpha_inputs[0].setValue(0.35)
     assert not dialog.dirty_paths
     _draw_rectangle(qtbot, dialog)
     assert dialog.current_masks[0].alpha == 0.35
-    dialog.new_mask_alpha_input.setValue(0.8)
+    dialog.new_mask_alpha_inputs[0].setValue(0.8)
     assert dialog.current_masks[0].alpha == 0.35
     assert dialog.base_alpha_input.value() == 1.0
     dialog.next_button.click()
-    assert dialog.new_mask_alpha_input.value() == 0.8
+    assert dialog.new_mask_alpha_inputs[0].value() == 0.8
     dialog.polygon_button.click()
     rect = dialog.image_view.image_rect()
     for point in (
@@ -429,6 +430,41 @@ def test_new_mask_alpha_applies_to_new_shapes_and_persists_during_navigation(qtb
     assert row.alpha_input.value() == 0.8
     dialog.previous_button.click()
     assert dialog.current_masks[0].alpha == 0.35
+
+
+def test_alpha_presets_and_outset_defaults_persist_between_images(qtbot, tmp_path) -> None:
+    paths = [_image(tmp_path / name) for name in ("a.png", "b.png")]
+    dialog = MaskEditorDialog(paths)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert len(dialog.new_mask_alpha_buttons) == 4
+    assert len(dialog.new_mask_alpha_inputs) == 4
+    assert [button.text() for button in dialog.new_mask_alpha_buttons] == ["", "", "", ""]
+    assert any(label.text() == "New mask alpha" for label in dialog.findChildren(QLabel))
+    values = (0.1, 0.3, 0.6, 0.9)
+    for input_box, value in zip(dialog.new_mask_alpha_inputs, values):
+        input_box.setValue(value)
+    dialog.new_mask_alpha_buttons[2].click()
+    assert dialog.new_mask_alpha_inputs[2].value() == 0.6
+    dialog.new_mask_outset_button.click()
+    assert dialog.new_mask_outset_button.accessibleName() == "New mask outset"
+    assert dialog.new_mask_outset_button.icon().isNull() is False
+    dialog.next_button.click()
+    assert [input_box.value() for input_box in dialog.new_mask_alpha_inputs] == list(values)
+    assert dialog.new_mask_alpha_buttons[2].isChecked()
+    dialog._add_mask(((10, 10), (50, 10), (50, 40), (10, 40)))
+    assert dialog.current_masks[0].alpha == 0.6
+    assert dialog.current_masks[0].outset_style == "constant"
+
+
+def test_outset_options_expose_width_units(qtbot) -> None:
+    dialog = OutsetOptionsDialog("linear", 0.2, 12.0, "mask_percent")
+    qtbot.addWidget(dialog)
+    assert [dialog.outset_width_unit.itemText(index) for index in range(3)] == [
+        "px", "% of image size", "% of mask size"
+    ]
+    assert dialog.outset_width_unit.currentData() == "mask_percent"
+    assert dialog.values() == ("linear", 0.2, 12.0, "mask_percent")
 
 
 def test_drag_handle_starts_native_list_drag(qtbot, tmp_path, monkeypatch) -> None:

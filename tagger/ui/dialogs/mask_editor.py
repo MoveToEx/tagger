@@ -18,13 +18,14 @@ from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QDoubleSpinBox, QHBoxLayout,
     QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressBar,
     QPushButton, QToolButton, QVBoxLayout, QWidget, QSlider, QComboBox,
-    QDialogButtonBox, QFormLayout, QMenu,
+    QDialogButtonBox, QFormLayout, QMenu, QRadioButton,
 )
 
 from tagger.domain.masks import MaskRegion
 from tagger.domain.models import ImageEntry
 from tagger.mask_storage import (
-    load_mask_image, mask_editing_disabled_reason, render_masks, save_masks,
+    load_mask_image, mask_editing_disabled_reason, render_masks, resolve_outset_width,
+    save_masks,
 )
 from tagger.paths import PROJECT_ROOT
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
@@ -457,15 +458,11 @@ class MaskImageView(QWidget):
             if not self.actual_opacity and index != self.hovered_mask:
                 painter.drawPolygon(self._polygon(mask))
             painter.setOpacity(1.0)
-            if mask.fadeout_mode != "none" and mask.fadeout_width > 0:
+            amount = resolve_outset_width(mask, (self._pixmap.width(), self._pixmap.height()))
+            if mask.outset_style != "none" and amount > 0:
                 left, top, right, bottom = mask.bounds
-                amount = mask.fadeout_width
-                if mask.fadeout_mode == "outside":
-                    left, top = max(0.0, left - amount), max(0.0, top - amount)
-                    right, bottom = min(self._pixmap.width(), right + amount), min(self._pixmap.height(), bottom + amount)
-                else:
-                    left, top = min(right, left + amount), min(bottom, top + amount)
-                    right, bottom = max(left, right - amount), max(top, bottom - amount)
+                left, top = max(0.0, left - amount), max(0.0, top - amount)
+                right, bottom = min(self._pixmap.width(), right + amount), min(self._pixmap.height(), bottom + amount)
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(QColor(color).lighter(165))
                 painter.setOpacity(0.3)
@@ -752,49 +749,104 @@ class MaskPropertyDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Mask Properties")
         self.alpha_input = QDoubleSpinBox(); self.alpha_input.setRange(0, 1); self.alpha_input.setDecimals(2); self.alpha_input.setSingleStep(0.1); self.alpha_input.setValue(mask.alpha)
-        self.fadeout_mode = QComboBox(); self.fadeout_mode.addItem("No fadeout", "none"); self.fadeout_mode.addItem("Fade from outside border", "outside"); self.fadeout_mode.addItem("Fade within border", "inside")
-        self.fadeout_mode.setCurrentIndex(max(0, self.fadeout_mode.findData(mask.fadeout_mode)))
+        self.outset_style = QComboBox()
+        self.outset_style.addItem("No outset", "none")
+        self.outset_style.addItem("Constant", "constant")
+        self.outset_style.addItem("Linear fadeout", "linear")
+        self.outset_style.addItem("Quadratic fadeout", "quadratic")
+        self.outset_style.setCurrentIndex(max(0, self.outset_style.findData(mask.outset_style)))
         self.destination_alpha = QDoubleSpinBox(); self.destination_alpha.setRange(0, 1); self.destination_alpha.setDecimals(2); self.destination_alpha.setSingleStep(0.1); self.destination_alpha.setValue(mask.destination_alpha)
-        self.fadeout_width = QDoubleSpinBox(); self.fadeout_width.setRange(0, 10000); self.fadeout_width.setDecimals(1); self.fadeout_width.setSingleStep(1); self.fadeout_width.setValue(mask.fadeout_width)
-        for control in (self.alpha_input, self.destination_alpha, self.fadeout_width):
+        self.outset_width = QDoubleSpinBox(); self.outset_width.setRange(0, 10000); self.outset_width.setDecimals(1); self.outset_width.setSingleStep(1); self.outset_width.setValue(mask.outset_width)
+        self.outset_width_unit = QComboBox()
+        self.outset_width_unit.addItem("px", "px")
+        self.outset_width_unit.addItem("% of image size", "image_percent")
+        self.outset_width_unit.addItem("% of mask size", "mask_percent")
+        self.outset_width_unit.setAccessibleName("Outset width unit")
+        self.outset_width_unit.setToolTip("Unit used for the outset width")
+        self.outset_width_unit.setCurrentIndex(
+            max(0, self.outset_width_unit.findData(mask.outset_width_unit))
+        )
+        for control in (self.alpha_input, self.destination_alpha, self.outset_width):
             stabilize_widget_size(control, minimum_width=96, vertical_padding=2)
-        stabilize_widget_size(self.fadeout_mode, minimum_width=180)
-        form = QFormLayout(self); form.addRow("Alpha", self.alpha_input); form.addRow("Fadeout", self.fadeout_mode); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Fadeout width (pixels)", self.fadeout_width)
+        stabilize_widget_size(self.outset_style, minimum_width=180)
+        stabilize_widget_size(self.outset_width_unit, minimum_width=132)
+        width_controls = QWidget()
+        width_layout = QHBoxLayout(width_controls)
+        width_layout.setContentsMargins(0, 0, 0, 0)
+        width_layout.addWidget(self.outset_width)
+        width_layout.addWidget(self.outset_width_unit)
+        form = QFormLayout(self); form.addRow("Alpha", self.alpha_input); form.addRow("Outset", self.outset_style); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Outset width", width_controls)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
-        self.fadeout_mode.currentIndexChanged.connect(self._update_enabled); self._update_enabled()
+        self.outset_style.currentIndexChanged.connect(self._update_enabled); self._update_enabled()
 
     def _update_enabled(self, *_args: object) -> None:
-        enabled = self.fadeout_mode.currentData() != "none"
-        self.destination_alpha.setEnabled(enabled); self.fadeout_width.setEnabled(enabled)
+        enabled = self.outset_style.currentData() != "none"
+        self.destination_alpha.setEnabled(enabled)
+        self.outset_width.setEnabled(enabled)
+        self.outset_width_unit.setEnabled(enabled)
 
-    def values(self) -> tuple[float, str, float, float]:
-        return (self.alpha_input.value(), str(self.fadeout_mode.currentData()), self.destination_alpha.value(), self.fadeout_width.value())
+    def values(self) -> tuple[float, str, float, float, str]:
+        return (
+            self.alpha_input.value(),
+            str(self.outset_style.currentData()),
+            self.destination_alpha.value(),
+            self.outset_width.value(),
+            str(self.outset_width_unit.currentData()),
+        )
 
 
-class FadeoutOptionsDialog(QDialog):
-    """Configure fadeout defaults for masks drawn in the editor."""
-    def __init__(self, mode: str, destination_alpha: float, width: float, parent: QWidget | None = None) -> None:
+class OutsetOptionsDialog(QDialog):
+    """Configure outset defaults for masks drawn in the editor."""
+    def __init__(
+        self,
+        style: str,
+        destination_alpha: float,
+        width: float,
+        unit: str = "px",
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Fadeout Options")
-        self.fadeout_mode = QComboBox(); self.fadeout_mode.addItem("No fadeout", "none"); self.fadeout_mode.addItem("Fade from outside border", "outside"); self.fadeout_mode.addItem("Fade within border", "inside")
-        self.fadeout_mode.setCurrentIndex(max(0, self.fadeout_mode.findData(mode)))
+        self.setWindowTitle("Outset Options")
+        self.outset_style = QComboBox()
+        self.outset_style.addItem("Constant", "constant")
+        self.outset_style.addItem("Linear fadeout", "linear")
+        self.outset_style.addItem("Quadratic fadeout", "quadratic")
+        self.outset_style.setCurrentIndex(max(0, self.outset_style.findData(style)))
         self.destination_alpha = QDoubleSpinBox(); self.destination_alpha.setRange(0, 1); self.destination_alpha.setDecimals(2); self.destination_alpha.setSingleStep(0.1); self.destination_alpha.setValue(destination_alpha)
-        self.fadeout_width = QDoubleSpinBox(); self.fadeout_width.setRange(0, 10000); self.fadeout_width.setDecimals(1); self.fadeout_width.setSingleStep(1); self.fadeout_width.setValue(width)
-        stabilize_widget_size(self.fadeout_mode, minimum_width=180)
-        for control in (self.destination_alpha, self.fadeout_width):
+        self.outset_width = QDoubleSpinBox(); self.outset_width.setRange(0, 10000); self.outset_width.setDecimals(1); self.outset_width.setSingleStep(1); self.outset_width.setValue(width)
+        self.outset_width_unit = QComboBox()
+        self.outset_width_unit.addItem("px", "px")
+        self.outset_width_unit.addItem("% of image size", "image_percent")
+        self.outset_width_unit.addItem("% of mask size", "mask_percent")
+        self.outset_width_unit.setAccessibleName("Outset width unit")
+        self.outset_width_unit.setToolTip("Unit used for the outset width")
+        self.outset_width_unit.setCurrentIndex(
+            max(0, self.outset_width_unit.findData(unit))
+        )
+        stabilize_widget_size(self.outset_style, minimum_width=180)
+        for control in (self.destination_alpha, self.outset_width):
             stabilize_widget_size(control, minimum_width=96, vertical_padding=2)
-        form = QFormLayout(self); form.addRow("Fadeout", self.fadeout_mode); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Fadeout width (pixels)", self.fadeout_width)
+        stabilize_widget_size(self.outset_width_unit, minimum_width=132)
+        width_controls = QWidget()
+        width_layout = QHBoxLayout(width_controls)
+        width_layout.setContentsMargins(0, 0, 0, 0)
+        width_layout.addWidget(self.outset_width)
+        width_layout.addWidget(self.outset_width_unit)
+        form = QFormLayout(self); form.addRow("Outset style", self.outset_style); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Outset width", width_controls)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
-        self.fadeout_mode.currentIndexChanged.connect(self._update_enabled); self._update_enabled()
+        self.destination_alpha.setEnabled(True)
+        self.outset_width.setEnabled(True)
+        self.outset_width_unit.setEnabled(True)
 
-    def _update_enabled(self, *_args: object) -> None:
-        enabled = self.fadeout_mode.currentData() != "none"
-        self.destination_alpha.setEnabled(enabled); self.fadeout_width.setEnabled(enabled)
-
-    def values(self) -> tuple[str, float, float]:
-        return (str(self.fadeout_mode.currentData()), self.destination_alpha.value(), self.fadeout_width.value())
+    def values(self) -> tuple[str, float, float, str]:
+        return (
+            str(self.outset_style.currentData()),
+            self.destination_alpha.value(),
+            self.outset_width.value(),
+            str(self.outset_width_unit.currentData()),
+        )
 
 
 class MaskEditorDialog(QDialog):
@@ -863,37 +915,66 @@ class MaskEditorDialog(QDialog):
         base_alpha_row.addStretch()
         base_alpha_row.addWidget(self.base_alpha_input)
         mask_layout.addLayout(base_alpha_row)
-        self.new_mask_alpha_input = QDoubleSpinBox()
-        self.new_mask_alpha_input.setRange(0.0, 1.0)
-        self.new_mask_alpha_input.setDecimals(3)
-        self.new_mask_alpha_input.setSingleStep(0.05)
-        self.new_mask_alpha_input.setValue(0.0)
-        self.new_mask_alpha_input.setAccessibleName("New mask alpha")
-        self.new_mask_alpha_input.setToolTip("Alpha for newly drawn masks")
-        stabilize_widget_size(self.new_mask_alpha_input, minimum_width=88, vertical_padding=2)
-        new_mask_alpha_row = QHBoxLayout()
-        new_mask_alpha_row.addWidget(QLabel("New mask alpha"))
-        new_mask_alpha_row.addStretch()
-        new_mask_alpha_row.addWidget(self.new_mask_alpha_input)
-        mask_layout.addLayout(new_mask_alpha_row)
-        self.new_mask_fadeout_enabled = False
-        self.new_mask_fadeout_mode = "none"
+        self.new_mask_alpha_buttons: list[QRadioButton] = []
+        self.new_mask_alpha_inputs: list[QDoubleSpinBox] = []
+        self._new_mask_alpha_group = QButtonGroup(self)
+        alpha_label = QLabel("New mask alpha")
+        for index, value in enumerate((0.0, 0.25, 0.5, 1.0), 1):
+            radio = QRadioButton()
+            radio.setAccessibleName(f"New mask alpha option {index}")
+            radio.setToolTip("Use this alpha for newly drawn masks")
+            alpha_input = QDoubleSpinBox()
+            alpha_input.setRange(0.0, 1.0)
+            alpha_input.setDecimals(3)
+            alpha_input.setSingleStep(0.05)
+            alpha_input.setValue(value)
+            alpha_input.setAccessibleName(f"New mask alpha {index} value")
+            alpha_input.setToolTip("Alpha for newly drawn masks")
+            stabilize_widget_size(alpha_input, minimum_width=88, vertical_padding=2)
+            self._new_mask_alpha_group.addButton(radio, index - 1)
+            radio.toggled.connect(
+                lambda checked, preset=index - 1: self._set_new_mask_alpha_preset(
+                    preset, checked
+                )
+            )
+            alpha_input.valueChanged.connect(
+                lambda _value, preset=index - 1: self._new_mask_alpha_value_changed(
+                    preset
+                )
+            )
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            if index == 1:
+                row.addWidget(alpha_label)
+            row.addStretch()
+            row.addWidget(radio)
+            row.addWidget(alpha_input)
+            mask_layout.addLayout(row)
+            self.new_mask_alpha_buttons.append(radio)
+            self.new_mask_alpha_inputs.append(alpha_input)
+        self.new_mask_alpha_buttons[0].setChecked(True)
+        self._new_mask_alpha_index = 0
+
+        self.new_mask_outset_enabled = False
+        self.new_mask_outset_style = "constant"
         self.new_mask_destination_alpha = 0.0
-        self.new_mask_fadeout_width = 0.0
-        self.new_mask_fadeout_button = QToolButton()
-        self.new_mask_fadeout_button.setIcon(QIcon(str(PROJECT_ROOT / "assets" / "icons" / "fadeout.svg")))
-        self.new_mask_fadeout_button.setIconSize(QSize(22, 22))
-        self.new_mask_fadeout_button.setFixedSize(34, 34)
-        self.new_mask_fadeout_button.setCheckable(True)
-        self.new_mask_fadeout_button.setAccessibleName("New mask fadeout")
-        self.new_mask_fadeout_button.setToolTip("Enable fadeout for newly drawn masks (right-click to configure)")
-        stabilize_checked_tool_button(self.new_mask_fadeout_button)
-        self.new_mask_fadeout_button.toggled.connect(self._set_new_mask_fadeout_enabled)
-        self.new_mask_fadeout_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.new_mask_fadeout_button.customContextMenuRequested.connect(self._edit_new_mask_properties)
-        fadeout_row = QHBoxLayout()
-        fadeout_row.addStretch(); fadeout_row.addWidget(self.new_mask_fadeout_button)
-        mask_layout.addLayout(fadeout_row)
+        self.new_mask_outset_width = 0.0
+        self.new_mask_outset_width_unit = "px"
+        self.new_mask_outset_button = QToolButton()
+        self.new_mask_outset_button.setIcon(QIcon(str(PROJECT_ROOT / "assets" / "icons" / "fadeout.svg")))
+        self.new_mask_outset_button.setIconSize(QSize(22, 22))
+        self.new_mask_outset_button.setFixedSize(34, 34)
+        self.new_mask_outset_button.setCheckable(True)
+        self.new_mask_outset_button.setAccessibleName("New mask outset")
+        self.new_mask_outset_button.setToolTip("Enable outset for newly drawn masks (right-click to configure)")
+        stabilize_checked_tool_button(self.new_mask_outset_button)
+        self.new_mask_outset_button.toggled.connect(self._set_new_mask_outset_enabled)
+        self.new_mask_outset_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.new_mask_outset_button.customContextMenuRequested.connect(self._edit_new_mask_properties)
+        outset_row = QHBoxLayout()
+        outset_row.addWidget(self.new_mask_outset_button)
+        outset_row.addStretch()
+        mask_layout.addLayout(outset_row)
         mask_layout.addWidget(QLabel("Current masks · Alpha"))
         self.mask_list = MaskList()
         self.mask_list.customContextMenuRequested.connect(self._mask_context_menu)
@@ -1003,30 +1084,40 @@ class MaskEditorDialog(QDialog):
         self._hue = (self._hue + 0.61803398875) % 1.0
         color = QColor.fromHsvF(self._hue, 0.72, 0.92).name()
         self.current_masks.insert(0, MaskRegion(
-            points, alpha=self.new_mask_alpha_input.value(), color=color,
-            fadeout_mode=self.new_mask_fadeout_mode if self.new_mask_fadeout_enabled else "none",
+            points, alpha=self.new_mask_alpha_inputs[self._new_mask_alpha_index].value(), color=color,
+            outset_style=self.new_mask_outset_style if self.new_mask_outset_enabled else "none",
             destination_alpha=self.new_mask_destination_alpha,
-            fadeout_width=self.new_mask_fadeout_width,
+            outset_width=self.new_mask_outset_width,
+            outset_width_unit=self.new_mask_outset_width_unit,
         ))
         self._changed()
         self._rebuild_mask_list()
         self.mask_list.setCurrentRow(0)
 
-    def _set_new_mask_fadeout_enabled(self, enabled: bool) -> None:
-        self.new_mask_fadeout_enabled = enabled
+    def _set_new_mask_alpha_preset(self, index: int, checked: bool) -> None:
+        if checked:
+            self._new_mask_alpha_index = index
+
+    def _new_mask_alpha_value_changed(self, index: int) -> None:
+        if index == self._new_mask_alpha_index:
+            self._new_mask_alpha_index = index
+
+    def _set_new_mask_outset_enabled(self, enabled: bool) -> None:
+        self.new_mask_outset_enabled = enabled
 
     def _edit_new_mask_properties(self, _position) -> None:
-        dialog = FadeoutOptionsDialog(
-            self.new_mask_fadeout_mode, self.new_mask_destination_alpha,
-            self.new_mask_fadeout_width, self,
+        dialog = OutsetOptionsDialog(
+            self.new_mask_outset_style, self.new_mask_destination_alpha,
+            self.new_mask_outset_width, self.new_mask_outset_width_unit, self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        mode, destination, width = dialog.values()
-        self.new_mask_fadeout_mode = mode
+        mode, destination, width, unit = dialog.values()
+        self.new_mask_outset_style = mode
         self.new_mask_destination_alpha = destination
-        self.new_mask_fadeout_width = width
-        self.new_mask_fadeout_button.setChecked(mode != "none")
+        self.new_mask_outset_width = width
+        self.new_mask_outset_width_unit = unit
+        self.new_mask_outset_button.setChecked(True)
 
     def _set_base_alpha(self, alpha: float) -> None:
         self._base_alpha = alpha
@@ -1079,8 +1170,15 @@ class MaskEditorDialog(QDialog):
         dialog = MaskPropertyDialog(self.current_masks[index], self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        alpha, mode, destination, width = dialog.values()
-        self.current_masks[index] = replace(self.current_masks[index], alpha=alpha, fadeout_mode=mode, destination_alpha=destination, fadeout_width=width)
+        alpha, mode, destination, width, unit = dialog.values()
+        self.current_masks[index] = replace(
+            self.current_masks[index],
+            alpha=alpha,
+            outset_style=mode,
+            destination_alpha=destination,
+            outset_width=width,
+            outset_width_unit=unit,
+        )
         self._changed()
         self._rebuild_mask_list()
         self.mask_list.setCurrentRow(index)

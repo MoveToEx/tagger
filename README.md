@@ -126,7 +126,6 @@ _Tags_ > _Toggle Tags_ combines the two.
 Adding/Deleting tags will ask you for the image to act on and a list of tags. When traversing, you need to decide on which one to add or delete for each image-tag pair. Tags already present/absent will be ignored. 
 
 Decisions are committed only when you click on finish button, and are saved to memory whenever it is changed (i.e. whenever you toggle a tag).  
-You can use <kbd>Space</kbd> to toggle a tag, <kbd>↑</kbd>/<kbd>↓</kbd> to select between tags, <kbd>←</kbd>/<kbd>→</kbd>/<kbd>Enter</kbd> to navigate between images (this is purely navigational and does not affect in-memory decision store), and <kbd>A</kbd> to select/deselect all tags.
 
 #### Review
 
@@ -167,6 +166,29 @@ $$
 $$
 
 For concept LoRAs, try to avoid correlating your activation tag with an unrelated tag.
+
+### Keyboard shortcuts
+
+In traversal dialogs (add/delete/toggle/review):
+- <kbd>Space</kbd> Toggle tag checked state
+- <kbd>↑</kbd>/<kbd>↓</kbd> Select between tags
+- <kbd>←</kbd>/<kbd>→</kbd>/<kbd>Enter</kbd> Navigate between images (this is purely navigational and does not affect in-memory decision store)
+- <kbd>A</kbd> Select/deselect all tags.
+- <kbd>Back</kbd>/<kbd>Forward</kbd> Navigate between images
+
+In delete filter dialog:
+- <kbd>LMB</kbd> Mark an image as to keep and navigate to next image
+- <kbd>RMB</kbd> Mark an image as to delete and navigate to next image
+- <kbd>←</kbd>/<kbd>→</kbd> Navigate between images
+- <kbd>Back</kbd>/<kbd>Forward</kbd> Navigate between images
+
+In complex filter dialog:
+- <kbd>Ctrl</kbd>+<kbd>Enter</kbd> Run filter
+
+In pixel transform dialog:
+- <kbd>Ctrl</kbd>+<kbd>Enter</kbd> Run preview
+
+
 
 ## Code layout
 
