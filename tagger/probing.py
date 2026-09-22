@@ -100,6 +100,38 @@ _MULTIPLE_PEOPLE_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 
+_HAIR_COLORS = frozenset(
+    {
+        "aqua",
+        "black",
+        "blonde",
+        "blue",
+        "brown",
+        "green",
+        "grey",
+        "orange",
+        "pink",
+        "purple",
+        "red",
+        "white",
+    }
+)
+_EYE_COLORS = frozenset(
+    {
+        "aqua",
+        "black",
+        "blue",
+        "brown",
+        "green",
+        "orange",
+        "purple",
+        "pink",
+        "red",
+        "white",
+        "yellow",
+    }
+)
+
 
 def _people_category(value: str) -> str:
     return value.casefold().removesuffix("s")
@@ -149,6 +181,83 @@ def _people_count_conflicts(
     return issues or None
 
 
+def _is_single_character_image(tags: ProbeTags) -> bool:
+    single_categories: set[str] = set()
+    has_multiple_characters = False
+    for tag in tags:
+        number_match = _PEOPLE_COUNT_PATTERN.fullmatch(tag)
+        if number_match is not None:
+            category = _people_category(number_match.group("category"))
+            if number_match.group("count") == "1":
+                single_categories.add(category)
+            else:
+                has_multiple_characters = True
+            continue
+        if _MULTIPLE_PEOPLE_PATTERN.fullmatch(tag) is not None:
+            has_multiple_characters = True
+    return (
+        bool(single_categories)
+        and len(single_categories) == 1
+        and not has_multiple_characters
+    )
+
+
+def _normalized_style_tag(tag: str) -> str:
+    return tag.replace("_", " ").casefold()
+
+
+def _style_color_tags(
+    tags: ProbeTags, suffix: str, colors: frozenset[str]
+) -> dict[str, list[str]]:
+    matches: dict[str, list[str]] = {}
+    for tag in sorted(tags, key=lambda value: (value.casefold(), value)):
+        normalized = _normalized_style_tag(tag)
+        if " " not in normalized:
+            continue
+        color, tag_suffix = normalized.rsplit(" ", 1)
+        if tag_suffix != suffix or color not in colors:
+            continue
+        matches.setdefault(color, []).append(tag)
+    return matches
+
+
+def _hair_eye_style_conflicts(
+    _filename: str, tags: ProbeTags
+) -> list[str] | None:
+    if not _is_single_character_image(tags):
+        return None
+
+    normalized_tags = {_normalized_style_tag(tag) for tag in tags}
+    issues: list[str] = []
+
+    hair_tags = _style_color_tags(tags, "hair", _HAIR_COLORS)
+    if len(hair_tags) > 1 and "multicolored hair" not in normalized_tags:
+        issues.append(
+            "Conflicting hair colors: "
+            + ", ".join(
+                tag
+                for tags_for_color in hair_tags.values()
+                for tag in tags_for_color
+            )
+        )
+
+    eye_tags = _style_color_tags(tags, "eyes", _EYE_COLORS)
+    if len(eye_tags) > 1 and not {
+        "heterochromia",
+        "multicolored eyes",
+    }.intersection(normalized_tags):
+        issues.append(
+            "Conflicting eye colors: "
+            + ", ".join(
+                tag
+                for tags_for_color in eye_tags.values()
+                for tag in tags_for_color
+            )
+        )
+
+    return issues or None
+
+
 def _artist_conflicts(_filename: str, tags: ProbeTags) -> str | None:
     artist_tags = sorted(
         (
@@ -180,6 +289,12 @@ BUILTIN_PROBE_RULES: tuple[ProbeRule, ...] = (
         "people-count-conflicts",
         _people_count_conflicts,
         "Find conflicting counts for boys, girls, others, and futas.",
+        builtin=True,
+    ),
+    ProbeRule(
+        "hair-eye-style-conflicts",
+        _hair_eye_style_conflicts,
+        "Find conflicting hair or eye colors on single-character images.",
         builtin=True,
     ),
     ProbeRule(

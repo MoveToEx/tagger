@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGroupBox, QMessageBox
 
 from tagger.domain.models import ImageEntry
+from tagger.tag_library.format import write_tag_library
+from tagger.tag_library.library import TagLibrary
 from tagger.ui.dialogs.review import ReviewDialog
 
 from .helpers import assert_stable_widget_size, create_png
@@ -97,6 +99,83 @@ def test_review_keep_all_keeps_current_image_and_advances(qtbot, tmp_path: Path)
     assert dialog.session.current_tag == "bird"
     assert dialog.session.reviewed_tags[0] == {"cat", "dog"}
     assert dialog.session.current_tags == ["bird"]
+
+
+def test_review_setup_ignores_tags_and_keeps_them_by_default(
+    qtbot, tmp_path: Path
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_bytes(b"cat, dog\n")
+    entry = ImageEntry(image_path, tag_path, ["cat", "dog"], b"cat, dog\n")
+    dialog = ReviewDialog([entry], root_directory=tmp_path)
+    qtbot.addWidget(dialog)
+    dialog.ignored_tags_input.setText("dog")
+    dialog.start_button.click()
+
+    assert dialog.session.current_tag == "cat"
+    assert [
+        dialog.tag_status_list.item(row).text()
+        for row in range(dialog.tag_status_list.count())
+    ] == ["[pending] cat"]
+    dialog.keep_button.click()
+    assert dialog.session.finished
+    assert dialog.session.staged_changes() == []
+
+
+def test_review_ignore_tags_input_supports_autocomplete(
+    qtbot, tmp_path: Path
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_bytes(b"cat, dog\n")
+    library_path = tmp_path / "tags.bin"
+    write_tag_library(library_path, [("dog", 100), ("door", 80)])
+    library = TagLibrary(library_path)
+    entry = ImageEntry(image_path, tag_path, ["cat", "dog"], b"cat, dog\n")
+    dialog = ReviewDialog(
+        [entry], root_directory=tmp_path, tag_library=library
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    dialog.ignored_tags_input.setFocus()
+    dialog.ignored_tags_input.setText("do")
+    completer = dialog.ignored_tags_completer
+    assert completer is not None
+    qtbot.waitUntil(lambda: completer.popup().isVisible())
+    index = completer.popup().model().index(0, 0)
+    qtbot.mouseDClick(
+        completer.popup().viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=completer.popup().visualRect(index).center(),
+    )
+
+    assert dialog.ignored_tags_input.text() == "dog"
+
+
+def test_review_preview_mouse_buttons_keep_and_delete_current_tag(
+    qtbot, tmp_path: Path
+) -> None:
+    image_path = tmp_path / "sample.png"
+    tag_path = tmp_path / "sample.txt"
+    create_png(image_path)
+    tag_path.write_bytes(b"cat, dog\n")
+    dialog = ReviewDialog(
+        [ImageEntry(image_path, tag_path, ["cat", "dog"], b"cat, dog\n")]
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.LeftButton)
+    assert dialog.session.current_tag == "dog"
+    qtbot.mouseClick(dialog.image_view, Qt.MouseButton.RightButton)
+    assert dialog.session.finished
+    assert dialog.session.working_tags[0] == ["cat"]
 
 
 def test_review_tag_decision_click_selects_current_tag(qtbot, tmp_path: Path) -> None:

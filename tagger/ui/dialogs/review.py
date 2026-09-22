@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import cast, override
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent
+from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QDialog,
     QGroupBox,
@@ -83,6 +83,14 @@ class ReviewDialog(QDialog):
             "Check folders or individual images to include in the review."
         )
         self.folder_selection_label = QLabel()
+        ignored_tags_label = QLabel("Tags to ignore (comma-separated)")
+        self.ignored_tags_input = QLineEdit()
+        self.ignored_tags_input.setPlaceholderText("Tags to keep without reviewing")
+        self.ignored_tags_input.setClearButtonEnabled(True)
+        self.ignored_tags_completer = attach_tag_completer(
+            self.ignored_tags_input, tag_library
+        )
+        stabilize_widget_size(self.ignored_tags_input, minimum_width=256)
         self.start_button = QPushButton("Start Review")
         self.start_button.clicked.connect(self._start_selected)
         cancel_button = QPushButton("Cancel")
@@ -95,6 +103,8 @@ class ReviewDialog(QDialog):
         setup_layout.addWidget(setup_label)
         setup_layout.addWidget(self.folder_tree, 1)
         setup_layout.addWidget(self.folder_selection_label)
+        setup_layout.addWidget(ignored_tags_label)
+        setup_layout.addWidget(self.ignored_tags_input)
         setup_layout.addLayout(setup_buttons)
 
         self.progress_label = QLabel()
@@ -367,7 +377,7 @@ class ReviewDialog(QDialog):
         entries = self._checked_entries()
         if not entries:
             return
-        self._session = ReviewSession(entries)
+        self._session = ReviewSession(entries, parse_tags(self.ignored_tags_input.text()))
         if not self.session.items:
             QMessageBox.information(self, "Nothing to Review", "The selected images have no editable tags.")
             return
@@ -393,7 +403,7 @@ class ReviewDialog(QDialog):
         self.progress_label.setText(
             f"Image {session.current_index + 1} of {len(session.items)}"
             f" | Tag {session.current_tag_index + 1} of "
-            f"{len(session.current_item.original_tags)}"
+            f"{len(session.current_review_tags)}"
             f" | Reviewed tags {session.reviewed_tag_count} of "
             f"{session.total_tag_count}"
         )
@@ -419,7 +429,7 @@ class ReviewDialog(QDialog):
         current_tags = set(session.current_tags)
         current_tag = session.current_tag
         current_row = -1
-        for row, tag in enumerate(session.current_item.original_tags):
+        for row, tag in enumerate(session.current_review_tags):
             if tag in reviewed:
                 marker = "[kept]" if tag in current_tags else "[deleted]"
             else:
@@ -445,7 +455,7 @@ class ReviewDialog(QDialog):
         self.progress_label.setText(
             f"Image {session.current_index + 1} of {len(session.items)}"
             f" | Tag {session.current_tag_index + 1} of "
-            f"{len(session.current_item.original_tags)}"
+            f"{len(session.current_review_tags)}"
             f" | Reviewed tags {session.reviewed_tag_count} of "
             f"{session.total_tag_count}"
         )
@@ -476,6 +486,29 @@ class ReviewDialog(QDialog):
 
     @override
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if self._started and event.type() in {
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+        }:
+            if (
+                isinstance(event, QMouseEvent)
+                and event.button()
+                in {Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton}
+                and watched
+                in {
+                    self.image_view,
+                    self.image_view.viewport(),
+                    self.image_view.widget(),
+                    self.tag_label,
+                }
+            ):
+                if event.type() == QEvent.Type.MouseButtonRelease:
+                    if event.button() == Qt.MouseButton.LeftButton:
+                        self._keep()
+                    else:
+                        self._delete()
+                event.accept()
+                return True
         if self._started and event.type() == QEvent.Type.KeyPress:
             if isinstance(watched, QLineEdit):
                 return super().eventFilter(watched, event)

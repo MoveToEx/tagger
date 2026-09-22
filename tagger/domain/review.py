@@ -30,20 +30,32 @@ class ReviewItem:
 class ReviewSession:
     """In-memory review state; sidecars are written only at completion."""
 
-    def __init__(self, entries: Sequence[ImageEntry]) -> None:
+    def __init__(
+        self, entries: Sequence[ImageEntry], ignored_tags: Sequence[str] = ()
+    ) -> None:
         self.items = [
             ReviewItem.from_entry(entry)
             for entry in entries
             if entry.editable and entry.tags
         ]
+        ignored = set(unique_tags(ignored_tags))
+        self.review_tags: dict[int, tuple[str, ...]] = {
+            index: tuple(tag for tag in item.original_tags if tag not in ignored)
+            for index, item in enumerate(self.items)
+        }
         self.current_index = 0
         self.current_tag_index = 0
-        self.completed = not self.items
+        self.completed = not any(self.review_tags.values())
+        for index, tags in self.review_tags.items():
+            if tags:
+                self.current_index = index
+                break
         self.working_tags: dict[int, list[str]] = {
             index: list(item.original_tags) for index, item in enumerate(self.items)
         }
         self.reviewed_tags: dict[int, set[str]] = {
-            index: set() for index in range(len(self.items))
+            index: set(item.original_tags) - set(self.review_tags[index])
+            for index, item in enumerate(self.items)
         }
 
     @property
@@ -60,7 +72,16 @@ class ReviewSession:
     def current_tag(self) -> str:
         if not self.items:
             return ""
-        return self.current_item.original_tags[self.current_tag_index]
+        tags = self.review_tags[self.current_index]
+        if not tags:
+            return ""
+        return tags[self.current_tag_index]
+
+    @property
+    def current_review_tags(self) -> tuple[str, ...]:
+        if not self.items:
+            return ()
+        return self.review_tags[self.current_index]
 
     @property
     def finished(self) -> bool:
@@ -68,13 +89,13 @@ class ReviewSession:
 
     @property
     def total_tag_count(self) -> int:
-        return sum(len(item.original_tags) for item in self.items)
+        return sum(len(tags) for tags in self.review_tags.values())
 
     @property
     def reviewed_tag_count(self) -> int:
         return sum(
-            sum(tag in self.reviewed_tags[index] for tag in item.original_tags)
-            for index, item in enumerate(self.items)
+            sum(tag in self.reviewed_tags[index] for tag in self.review_tags[index])
+            for index in range(len(self.items))
         )
 
     @property
@@ -88,7 +109,9 @@ class ReviewSession:
 
     @property
     def at_first(self) -> bool:
-        return self.current_index == 0 and self.current_tag_index == 0
+        return self.current_tag_index == 0 and not any(
+            self.review_tags[index] for index in range(self.current_index)
+        )
 
     @property
     def at_last(self) -> bool:
@@ -120,8 +143,9 @@ class ReviewSession:
         for tag in self.current_item.original_tags:
             self._restore_original_tag(tag)
         self.reviewed_tags[index].update(self.current_item.original_tags)
-        if index + 1 < len(self.items):
-            self.current_index = index + 1
+        next_index = self._next_item_index(index + 1)
+        if next_index is not None:
+            self.current_index = next_index
             self.current_tag_index = 0
         else:
             self.completed = True
@@ -140,7 +164,7 @@ class ReviewSession:
     def select_tag(self, tag_index: int) -> bool:
         if self.completed or not self.items:
             return False
-        if not 0 <= tag_index < len(self.current_item.original_tags):
+        if not 0 <= tag_index < len(self.current_review_tags):
             return False
         self.current_tag_index = tag_index
         return True
@@ -156,15 +180,21 @@ class ReviewSession:
 
     def move_back(self) -> bool:
         if self.completed:
+            if not any(self.review_tags.values()):
+                return False
             self.completed = False
             return True
         if self.current_tag_index > 0:
             self.current_tag_index -= 1
             return True
-        if self.current_index > 0:
-            self.current_index -= 1
-            self.current_tag_index = len(self.current_item.original_tags) - 1
-            return True
+        index = self.current_index - 1
+        while index >= 0:
+            tags = self.review_tags[index]
+            if tags:
+                self.current_index = index
+                self.current_tag_index = len(tags) - 1
+                return True
+            index -= 1
         return False
 
     def move_forward(self) -> bool:
@@ -186,10 +216,17 @@ class ReviewSession:
     def _next_position(self) -> tuple[int, int] | None:
         if not self.items:
             return None
-        if self.current_tag_index + 1 < len(self.current_item.original_tags):
+        if self.current_tag_index + 1 < len(self.current_review_tags):
             return self.current_index, self.current_tag_index + 1
-        if self.current_index + 1 < len(self.items):
-            return self.current_index + 1, 0
+        index = self._next_item_index(self.current_index + 1)
+        if index is not None:
+            return index, 0
+        return None
+
+    def _next_item_index(self, start: int) -> int | None:
+        for index in range(start, len(self.items)):
+            if self.review_tags[index]:
+                return index
         return None
 
     def _restore_original_tag(self, tag: str) -> None:

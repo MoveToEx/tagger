@@ -138,7 +138,7 @@ Decisions are stored in memory and are committed only when the revision finishes
 _Tags_ > _Probe_ checks all images whether they pass all builtin and user-defined rules and reports them when issues are found.  
 You can create your rules in the settings page. 
 
-Currently, builtin rules include case divergence, separator divergence, character count tag conflict and artist conflict.
+Currently, builtin rules include case divergence, separator divergence, character count tag conflict, hair/eye color conflict and artist conflict.
 
 #### AI tagging
 
@@ -169,12 +169,18 @@ For concept LoRAs, try to avoid correlating your activation tag with an unrelate
 
 ### Keyboard shortcuts
 
-In traversal dialogs (add/delete/toggle/review):
+In traversal dialogs (add/delete/toggle):
 - <kbd>Space</kbd> Toggle tag checked state
 - <kbd>↑</kbd>/<kbd>↓</kbd> Select between tags
 - <kbd>←</kbd>/<kbd>→</kbd>/<kbd>Enter</kbd> Navigate between images (this is purely navigational and does not affect in-memory decision store)
 - <kbd>A</kbd> Select/deselect all tags.
 - <kbd>Back</kbd>/<kbd>Forward</kbd> Navigate between images
+
+In tag review dialog:
+- <kbd>Space</kbd> Mark a tag as to delete and navigate to next tag
+- <kbd>Enter</kbd> Mark a tag as to keep and navigate to next tag
+- <kbd>←</kbd>/<kbd>→</kbd> Navigate between tags
+
 
 In delete filter dialog:
 - <kbd>LMB</kbd> Mark an image as to keep and navigate to next image

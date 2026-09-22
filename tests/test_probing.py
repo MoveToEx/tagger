@@ -86,6 +86,57 @@ def test_people_count_rule_allows_consistent_multiple_and_number_tags() -> None:
     assert probe_entries([entry], [rule]) == []
 
 
+def test_hair_eye_style_rule_reports_conflicting_colors_for_single_character() -> None:
+    rule = next(
+        rule
+        for rule in BUILTIN_PROBE_RULES
+        if rule.identifier == "hair-eye-style-conflicts"
+    )
+    entry = _entry(
+        Path("sample.png"),
+        [
+            "1girl",
+            "red hair",
+            "blue_hair",
+            "blue eyes",
+            "green_eyes",
+        ],
+    )
+
+    results = probe_entries([entry], [rule])
+
+    assert [issue.message for issue in results[0].issues] == [
+        "Conflicting hair colors: blue_hair, red hair",
+        "Conflicting eye colors: blue eyes, green_eyes",
+    ]
+
+
+def test_hair_eye_style_rule_skips_multi_character_images_and_exceptions() -> None:
+    rule = next(
+        rule
+        for rule in BUILTIN_PROBE_RULES
+        if rule.identifier == "hair-eye-style-conflicts"
+    )
+    entries = [
+        _entry(Path("multiple.png"), ["2girls", "red hair", "blue hair"]),
+        _entry(
+            Path("exceptions.png"),
+            [
+                "1boy",
+                "multicolored_hair",
+                "red hair",
+                "blue hair",
+                "heterochromia",
+                "blue eyes",
+                "green eyes",
+            ],
+        ),
+        _entry(Path("no-count.png"), ["red hair", "blue hair"]),
+    ]
+
+    assert probe_entries(entries, [rule]) == []
+
+
 @pytest.mark.parametrize(
     "tags",
     [
