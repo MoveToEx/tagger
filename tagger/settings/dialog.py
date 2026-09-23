@@ -88,7 +88,7 @@ from tagger.ui.preview.config import (
     SCROLL_PAN,
     SCROLL_ZOOM,
 )
-from tagger.ui.widgets import stabilize_widget_size
+from tagger.ui.widgets import stabilize_radio_button, stabilize_widget_size
 
 
 class _LegacyGroupAlias:
@@ -760,6 +760,7 @@ class SettingsDialog(QDialog):
             self.system_proxy_radio,
             self.custom_proxy_radio,
         ):
+            stabilize_radio_button(radio)
             self.proxy_mode_group.addButton(radio)
 
         self.proxy_input = QLineEdit(self._applied_proxy_url)
@@ -777,7 +778,7 @@ class SettingsDialog(QDialog):
         custom_proxy_row = QHBoxLayout()
         custom_proxy_row.setContentsMargins(0, 0, 0, 0)
         custom_proxy_row.addWidget(self.custom_proxy_radio)
-        custom_proxy_row.addWidget(self.proxy_input, 1)
+        custom_proxy_row.addWidget(self.proxy_input)
         group_layout = QVBoxLayout(self.proxy_server_group)
         group_layout.addWidget(self.no_proxy_radio)
         group_layout.addWidget(self.system_proxy_radio)

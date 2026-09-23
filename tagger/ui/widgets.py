@@ -5,7 +5,9 @@ from typing import override
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
+    QCheckBox,
     QProxyStyle,
+    QRadioButton,
     QSizePolicy,
     QStyle,
     QStyleOption,
@@ -65,6 +67,29 @@ def stabilize_checked_tool_button(button: QToolButton) -> None:
     stable_style = _StableCheckedToolButtonStyle(button.style().objectName())
     stable_style.setParent(button)
     button.setStyle(stable_style)
+
+
+def stabilize_checkbox(checkbox: QCheckBox) -> None:
+    checkbox.setStyleSheet(
+        "QCheckBox::indicator { width: 12px; height: 12px; }"
+    )
+    stabilize_widget_size(checkbox)
+
+
+def stabilize_radio_button(button: QRadioButton) -> None:
+    """Keep the radio indicator geometry unchanged while it is hovered."""
+    indicator_width = button.style().pixelMetric(
+        QStyle.PixelMetric.PM_ExclusiveIndicatorWidth, None, button
+    ) - 1
+    indicator_height = button.style().pixelMetric(
+        QStyle.PixelMetric.PM_ExclusiveIndicatorHeight, None, button
+    ) - 1
+    button.setStyleSheet(
+        "QRadioButton::indicator { "
+        f"width: {indicator_width}px; height: {indicator_height}px; "
+        "}"
+    )
+    stabilize_widget_size(button)
 
 
 def stabilize_widget_size(

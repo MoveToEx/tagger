@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QSizePolicy
+from PySide6.QtWidgets import QCheckBox
+
+from tagger.ui.widgets import stabilize_checkbox
 
 
 def _stabilize_checkbox(checkbox: QCheckBox) -> None:
-    checkbox.setStyleSheet(
-        "QCheckBox::indicator { width: 12px; height: 12px; }"
-    )
-    checkbox.setSizePolicy(
-        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
-    )
-    checkbox.setFixedHeight(checkbox.sizeHint().height())
+    stabilize_checkbox(checkbox)
 
 
 def _format_byte_size(size: int) -> str:

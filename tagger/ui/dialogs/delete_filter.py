@@ -25,6 +25,7 @@ from tagger.trash import SYSTEM_RECYCLE_BIN, UNLINK, delete_file
 from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.config import DEFAULT_IMAGE_PREFETCH_COUNT
 from tagger.ui.preview.loader import PreviewLoader
+from tagger.ui.widgets import stabilize_checkbox
 
 
 @dataclass
@@ -271,9 +272,7 @@ class DeleteFilterDialog(QDialog):
         self.preview_loader.loaded.connect(self._preview_loaded)
 
         self.delete_checkbox = QCheckBox("Delete this image")
-        self.delete_checkbox.setStyleSheet(
-            "QCheckBox::indicator { width: 12px; height: 12px; }"
-        )
+        stabilize_checkbox(self.delete_checkbox)
         self.delete_checkbox.toggled.connect(self._deletion_toggled)
 
         self.back_button = QPushButton("Back")

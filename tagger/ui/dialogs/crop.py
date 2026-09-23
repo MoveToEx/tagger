@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QIntValidator
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton, QStyle,
+    QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -21,7 +21,7 @@ from tagger.preprocess import PreprocessOptions, closest_bucket
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
 from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.crop import CropImageView
-from tagger.ui.widgets import stabilize_widget_size
+from tagger.ui.widgets import stabilize_radio_button, stabilize_widget_size
 
 
 ASPECT_RATIOS = ("Free", "Original", "1:1", "4:3", "3:4", "16:9", "9:16", "1:2", "2:1", "3:2", "2:3", "Custom")
@@ -155,18 +155,7 @@ class CropDialog(QDialog):
 
         def radio_button(text: str) -> QRadioButton:
             button = QRadioButton(text)
-            indicator_width = button.style().pixelMetric(
-                QStyle.PixelMetric.PM_ExclusiveIndicatorWidth, None, button,
-            ) - 1
-            indicator_height = button.style().pixelMetric(
-                QStyle.PixelMetric.PM_ExclusiveIndicatorHeight, None, button,
-            ) - 1
-            button.setStyleSheet(
-                "QRadioButton::indicator { "
-                f"width: {indicator_width}px; height: {indicator_height}px; "
-                "}"
-            )
-            stabilize_widget_size(button)
+            stabilize_radio_button(button)
             return button
 
         self.mode_group = QButtonGroup(self)

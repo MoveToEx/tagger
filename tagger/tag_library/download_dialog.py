@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from tagger.paths import get_tag_library_path
 from tagger.tag_library.download import download_danbooru_tags
+from tagger.ui.widgets import stabilize_widget_size
 
 
 class _DownloadWorker(QObject):
@@ -73,6 +74,7 @@ class DownloadTagsDialog(QDialog):
         self.minimum_posts_input.setRange(0, 2_000_000_000)
         self.minimum_posts_input.setValue(20)
         self.minimum_posts_input.setSuffix(" posts")
+        stabilize_widget_size(self.minimum_posts_input, vertical_padding=2)
         self.destination_label = QLabel(str(self.destination))
         self.destination_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse

@@ -148,7 +148,7 @@ class ReviewDialog(QDialog):
         temporary_layout = QHBoxLayout()
         temporary_layout.setContentsMargins(0, 0, 0, 0)
         temporary_layout.setSpacing(8)
-        temporary_layout.addWidget(self.temporary_input, 1)
+        temporary_layout.addWidget(self.temporary_input)
         temporary_layout.addWidget(self.temporary_add_button)
         self.fit_action = QAction("Fit to Window", self)
         self.fit_action.setCheckable(True)

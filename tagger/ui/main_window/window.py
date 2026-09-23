@@ -38,6 +38,7 @@ from tagger.tag_library.library import TagLibrary
 from tagger.ui.catalog import ImageCatalogModel, ImageCatalogView
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
+from tagger.ui.widgets import stabilize_widget_size
 
 from .actions import WindowActions
 from .dialogs import DialogController
@@ -140,6 +141,7 @@ class MainWindow(QMainWindow):
         self.tag_completer = attach_tag_completer(
             self.tag_input, self.tag_library
         )
+        stabilize_widget_size(self.tag_input, minimum_width=220)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search tags (* wildcard)")
@@ -154,6 +156,7 @@ class MainWindow(QMainWindow):
         self.search_completer = attach_tag_completer(
             self.search_input, self.tag_library
         )
+        stabilize_widget_size(self.search_input, minimum_width=180)
 
         self.add_tag_button = QPushButton("+")
         self.add_tag_button.setToolTip("Add these tags to the current image")
@@ -165,7 +168,7 @@ class MainWindow(QMainWindow):
 
         input_buttons = QHBoxLayout()
         input_buttons.setContentsMargins(0, 0, 0, 0)
-        input_buttons.addWidget(self.tag_input, 1)
+        input_buttons.addWidget(self.tag_input)
         input_buttons.addWidget(self.add_tag_button)
 
         tag_panel = QWidget()

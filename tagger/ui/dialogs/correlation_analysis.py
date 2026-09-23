@@ -112,7 +112,7 @@ class CorrelationAnalysisDialog(QDialog):
 
         input_layout = QHBoxLayout()
         input_layout.addWidget(QLabel("Tag to analyze"))
-        input_layout.addWidget(self.tag_input, 1)
+        input_layout.addWidget(self.tag_input)
 
         layout = QVBoxLayout(page)
         layout.addWidget(

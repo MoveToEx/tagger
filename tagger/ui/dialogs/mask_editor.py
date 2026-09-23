@@ -29,7 +29,11 @@ from tagger.mask_storage import (
 )
 from tagger.paths import PROJECT_ROOT
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
-from tagger.ui.widgets import stabilize_checked_tool_button, stabilize_widget_size
+from tagger.ui.widgets import (
+    stabilize_checked_tool_button,
+    stabilize_radio_button,
+    stabilize_widget_size,
+)
 
 
 @dataclass
@@ -923,6 +927,7 @@ class MaskEditorDialog(QDialog):
             radio = QRadioButton()
             radio.setAccessibleName(f"New mask alpha option {index}")
             radio.setToolTip("Use this alpha for newly drawn masks")
+            stabilize_radio_button(radio)
             alpha_input = QDoubleSpinBox()
             alpha_input.setRange(0.0, 1.0)
             alpha_input.setDecimals(3)

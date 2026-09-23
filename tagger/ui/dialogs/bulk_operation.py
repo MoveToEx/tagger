@@ -41,6 +41,7 @@ from tagger.ui.preview.config import DEFAULT_IMAGE_PREFETCH_COUNT
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
 from tagger.ui.python_syntax import PythonSyntaxHighlighter
+from tagger.ui.widgets import stabilize_checkbox
 
 
 DEFAULT_PROCESS_CODE = "def process(fn: str, tags: TagSet) -> set[str]:\n\treturn tags"
@@ -204,9 +205,7 @@ class BulkOperationDialog(QDialog):
         )
         self.apply_change_checkbox = QCheckBox("Apply change")
         self.apply_change_checkbox.setChecked(True)
-        self.apply_change_checkbox.setStyleSheet(
-            "QCheckBox::indicator { width: 12px; height: 12px; }"
-        )
+        stabilize_checkbox(self.apply_change_checkbox)
         self.apply_change_checkbox.toggled.connect(self._decision_changed)
 
         details_layout = QVBoxLayout()

@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 
 from tagger.domain.models import ImageEntry
 from tagger.storage import DreamboothConcept, archive_entries
-from tagger.ui.widgets import stabilize_widget_size
+from tagger.ui.widgets import stabilize_checkbox, stabilize_widget_size
 
 
 ENTRY_ROLE = int(Qt.ItemDataRole.UserRole) + 1
@@ -131,10 +131,7 @@ class ArchiveDialog(QDialog):
         self.dreambooth_enabled_checkbox = QCheckBox(
             "Enable Dreambooth-style dataset format"
         )
-        self.dreambooth_enabled_checkbox.setStyleSheet(
-            "QCheckBox::indicator { width: 12px; height: 12px; }"
-        )
-        stabilize_widget_size(self.dreambooth_enabled_checkbox)
+        stabilize_checkbox(self.dreambooth_enabled_checkbox)
         self.enable_dreambooth_checkbox = self.dreambooth_enabled_checkbox
         self.dreambooth_enabled_checkbox.toggled.connect(
             self._dreambooth_enabled_changed

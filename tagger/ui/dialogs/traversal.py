@@ -128,6 +128,7 @@ class TraversalDialog(QDialog):
         self.temporary_completer = attach_tag_completer(
             self.temporary_input, tag_library
         )
+        stabilize_widget_size(self.temporary_input, minimum_width=256)
         self.temporary_add_button = QPushButton("+")
         self.temporary_add_button.setToolTip(
             "Append these tags to the current image operation"
@@ -136,7 +137,7 @@ class TraversalDialog(QDialog):
         self.temporary_add_button.clicked.connect(self._append_temporary_tags)
         temporary_layout = QHBoxLayout()
         temporary_layout.setContentsMargins(0, 0, 0, 0)
-        temporary_layout.addWidget(self.temporary_input, 1)
+        temporary_layout.addWidget(self.temporary_input)
         temporary_layout.addWidget(self.temporary_add_button)
         detail_layout.addWidget(self.temporary_label)
         detail_layout.addLayout(temporary_layout)
