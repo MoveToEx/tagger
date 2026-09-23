@@ -49,6 +49,7 @@ class ImageCatalogModel(QStandardItemModel):
     EntryRole = int(Qt.ItemDataRole.UserRole) + 1
     GroupRole = int(Qt.ItemDataRole.UserRole) + 2
     FolderRole = int(Qt.ItemDataRole.UserRole) + 3
+    FolderPercentageRole = int(Qt.ItemDataRole.UserRole) + 4
     ImageMimeType = "application/x-tagger-image-path"
 
     def __init__(self, parent=None) -> None:
@@ -72,6 +73,7 @@ class ImageCatalogModel(QStandardItemModel):
         root_item = self.invisibleRootItem()
         folder_items: dict[Path, QStandardItem] = {Path("."): root_item}
         relative_parents: list[Path] = []
+        folder_image_counts: dict[Path, int] = {}
 
         for entry in entries:
             if root_directory is None:
@@ -79,6 +81,10 @@ class ImageCatalogModel(QStandardItemModel):
             else:
                 relative_parent = entry.image_path.parent.relative_to(root_directory)
             relative_parents.append(relative_parent)
+            for ancestor in _folder_ancestors(relative_parent):
+                folder_image_counts[ancestor] = (
+                    folder_image_counts.get(ancestor, 0) + 1
+                )
             self.groups.append(
                 "Root folder"
                 if relative_parent == Path(".")
@@ -100,12 +106,16 @@ class ImageCatalogModel(QStandardItemModel):
         for relative_folder in folders:
             parent_path = relative_folder.parent
             parent_item = folder_items[parent_path]
+            percentage = (
+                folder_image_counts[relative_folder] / len(entries) * 100
+            )
             folder_item = QStandardItem(relative_folder.name)
             folder_item.setEditable(False)
             folder_item.setSelectable(False)
             folder_item.setDragEnabled(False)
             folder_item.setDropEnabled(True)
             folder_item.setToolTip(relative_folder.as_posix())
+            folder_item.setData(percentage, self.FolderPercentageRole)
             if root_directory is not None:
                 folder_item.setData(
                     str(root_directory / relative_folder), self.FolderRole
@@ -304,7 +314,28 @@ class _ImageCatalogDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index) -> None:
         entry = index.data(ImageCatalogModel.EntryRole)
         if not isinstance(entry, ImageEntry):
-            super().paint(painter, option, index)
+            percentage = index.data(ImageCatalogModel.FolderPercentageRole)
+            if not isinstance(percentage, (int, float)):
+                super().paint(painter, option, index)
+                return
+            item_option = QStyleOptionViewItem(option)
+            self.initStyleOption(item_option, index)
+            item_option.text = (
+                f"{index.data(Qt.ItemDataRole.DisplayRole)} "
+                f"({percentage:.1f}%)"
+            )
+            item_option.textElideMode = Qt.TextElideMode.ElideRight
+            style = (
+                item_option.widget.style()
+                if item_option.widget is not None
+                else QApplication.style()
+            )
+            style.drawControl(
+                QStyle.ControlElement.CE_ItemViewItem,
+                item_option,
+                painter,
+                item_option.widget,
+            )
             return
 
         item_option = QStyleOptionViewItem(option)

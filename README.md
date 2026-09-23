@@ -106,7 +106,7 @@ Respects global ARB settings.
 
 #### VAE preview
 
-_Image_ > _VAE Preview_ encodes the current image with VAE and decodes it back to pixels, so as to show how it looks if it were generated entirely by the model. It should 
+_Image_ > _VAE Preview_ encodes the current image with VAE and decodes it back to pixels, so as to show how it looks if it were generated entirely by the model. 
 
 This step could be slow on some machines and is generally not necessary.  
 
