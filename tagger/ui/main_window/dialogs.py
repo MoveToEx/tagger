@@ -19,6 +19,7 @@ from tagger.probing import (
     ProbeResult,
     ProbeRuleError,
     get_enabled_probe_rules,
+    get_probe_minimum_level,
 )
 from tagger.settings.dialog import SettingsDialog
 from tagger.settings.preferences import (
@@ -227,6 +228,7 @@ class DialogController:
             return
         try:
             rules = get_enabled_probe_rules(self.window.settings)
+            minimum_level = get_probe_minimum_level(self.window.settings)
         except ProbeRuleError as exc:
             QMessageBox.critical(
                 self.window,
@@ -248,6 +250,7 @@ class DialogController:
             self.window,
             root_directory=self.window.directory,
             use_tag_set=get_scripting_use_tag_set(self.window.settings),
+            minimum_level=minimum_level,
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.completed.connect(self._probe_completed)

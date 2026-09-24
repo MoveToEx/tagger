@@ -38,6 +38,10 @@ PROXY_MODE_SETTING = "network/proxy_mode"
 SCRIPTING_TAGS_TYPE_SETTING = "scripting/tags_type"
 PROBING_BUILTIN_RULES_SETTING = "probing/builtin_rules"
 PROBING_CUSTOM_RULES_SETTING = "probing/custom_rules"
+PROBING_MINIMUM_LEVEL_SETTING = "probing/minimum_level"
+# Compatibility aliases for integrations that use the longer setting name.
+PROBING_MINIMUM_ISSUE_LEVEL_SETTING = PROBING_MINIMUM_LEVEL_SETTING
+PROBING_ISSUE_LEVEL_SETTING = PROBING_MINIMUM_LEVEL_SETTING
 SIMULATOR_TRAINING_RESOLUTION_SETTING = (
     "simulator/preprocess/training_resolution"
 )

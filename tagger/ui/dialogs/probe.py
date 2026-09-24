@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import override
+from typing import cast, override
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -17,12 +18,19 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from tagger.domain.models import ImageEntry
-from tagger.probing import ProbeResult, ProbeRule, probe_entries
+from tagger.probing import (
+    DEFAULT_PROBE_MINIMUM_LEVEL,
+    ProbeResult,
+    ProbeRule,
+    probe_entries,
+)
 
 
 class _ProbeSignals(QObject):
@@ -39,12 +47,14 @@ class _ProbeWorker(QRunnable):
         *,
         root_directory: Path | None,
         use_tag_set: bool,
+        minimum_level: str,
     ) -> None:
         super().__init__()
         self.entries = entries
         self.rules = rules
         self.root_directory = root_directory
         self.use_tag_set = use_tag_set
+        self.minimum_level = minimum_level
         self.signals = _ProbeSignals()
 
     @override
@@ -56,6 +66,7 @@ class _ProbeWorker(QRunnable):
                 self.signals.progress.emit,
                 root_directory=self.root_directory,
                 use_tag_set=self.use_tag_set,
+                minimum_level=self.minimum_level,
             )
         except Exception as exc:
             self.signals.failed.emit(str(exc))
@@ -75,6 +86,7 @@ class ProbeProgressDialog(QDialog):
         *,
         root_directory: Path | None = None,
         use_tag_set: bool = True,
+        minimum_level: str = DEFAULT_PROBE_MINIMUM_LEVEL,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Probing Tags")
@@ -102,6 +114,7 @@ class ProbeProgressDialog(QDialog):
             list(rules),
             root_directory=root_directory,
             use_tag_set=use_tag_set,
+            minimum_level=minimum_level,
         )
         self._worker.signals.progress.connect(self._update_progress)
         self._worker.signals.completed.connect(self._complete)
@@ -194,11 +207,21 @@ class ProbeDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.current_image_label.setWordWrap(True)
-        self.problem_list = QListWidget()
+        self.problem_list = _IssueTreeWidget()
+        self.problem_list.setHeaderLabels(["Level", "Message"])
+        self.problem_list.setRootIsDecorated(False)
         self.problem_list.setSelectionMode(
             QAbstractItemView.SelectionMode.NoSelection
         )
+        self.problem_list.setColumnCount(2)
+        self.problem_list.setUniformRowHeights(False)
         self.problem_list.setWordWrap(True)
+        self.problem_list.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.problem_list.header().setStretchLastSection(True)
+        self.problem_list.header().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Fixed
+        )
+        self.problem_list.header().resizeSection(0, 84)
         self.problem_list.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -266,10 +289,11 @@ class ProbeDialog(QDialog):
             self._relative_path(result.entry.image_path)
         )
         for issue in result.issues:
-            item = QListWidgetItem(
-                f"{issue.rule_identifier}: {issue.message}"
+            item = _IssueTreeItem(
+                [issue.level, issue.message],
+                legacy_text=f"{issue.rule_identifier}: {issue.message}",
             )
-            item.setToolTip(issue.message)
+            item.setToolTip(1, issue.message)
             self.problem_list.addItem(item)
 
     def _activate_image(self, item: QListWidgetItem) -> None:
@@ -279,3 +303,29 @@ class ProbeDialog(QDialog):
 
 
 ProbeResultsDialog = ProbeDialog
+
+
+class _IssueTreeItem(QTreeWidgetItem):
+    def __init__(
+        self, labels: list[str], *, legacy_text: str = ""
+    ) -> None:
+        super().__init__(labels)
+        self._legacy_text = legacy_text
+
+    def text(self, *args: int) -> str:
+        if not args and self._legacy_text:
+            return self._legacy_text
+        return super().text(args[0] if args else 0)
+
+
+class _IssueTreeWidget(QTreeWidget):
+    """Flat issue tree with the old QListWidget accessors kept for callers."""
+
+    def count(self) -> int:
+        return self.topLevelItemCount()
+
+    def item(self, index: int) -> _IssueTreeItem:
+        return cast(_IssueTreeItem, super().topLevelItem(index))
+
+    def addItem(self, item: QTreeWidgetItem) -> None:
+        self.addTopLevelItem(item)

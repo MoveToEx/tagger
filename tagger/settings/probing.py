@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
+    QSlider,
     QWidget,
 )
 
@@ -23,6 +24,7 @@ from tagger.probing import (
     BUILTIN_PROBE_RULES,
     DEFAULT_CUSTOM_PROBE_HANDLER,
     CustomProbeRule,
+    PROBE_ISSUE_LEVELS,
     ProbeConfiguration,
     ProbeRuleError,
     compile_custom_probe_rule,
@@ -70,7 +72,7 @@ class ProbeRuleEditorDialog(QDialog):
         )
         self.handler_input.setPlaceholderText(
             "Define handler(fn: str, tags: "
-            f"{type_name}) -> list[str] | str | None here."
+            f"{type_name}) -> list[tuple[str, str]] | tuple[str, str] | None here."
         )
         font = QFont("Consolas")
         font.setStyleHint(QFont.StyleHint.Monospace)
@@ -142,6 +144,28 @@ class ProbingSettingsPage(QWidget):
         self._use_tag_set = use_tag_set or (lambda: True)
         self._updating_items = False
 
+        self.minimum_level_label = QLabel()
+        self.minimum_level_slider = QSlider(Qt.Orientation.Horizontal)
+        self.minimum_level_slider.setRange(0, len(PROBE_ISSUE_LEVELS) - 1)
+        self.minimum_level_slider.setSingleStep(1)
+        self.minimum_level_slider.setPageStep(1)
+        self.minimum_level_slider.setTickPosition(
+            QSlider.TickPosition.TicksBelow
+        )
+        self.minimum_level_slider.setFixedWidth(150)
+        self.issue_level_slider = self.minimum_level_slider
+        self.minimum_issue_level_slider = self.minimum_level_slider
+        self.minimum_level_input = self.minimum_level_slider
+        try:
+            initial_level = PROBE_ISSUE_LEVELS.index(configuration.minimum_level)
+        except ValueError:
+            initial_level = 0
+        self.minimum_level_slider.setValue(initial_level)
+        self.minimum_level_slider.valueChanged.connect(
+            self._minimum_level_changed
+        )
+        self._minimum_level_changed(initial_level)
+
         self.rule_table = QTreeWidget()
         self.rule_table.setHeaderLabels(["Rule", "Type"])
         self.rule_table.setRootIsDecorated(False)
@@ -202,11 +226,24 @@ class ProbingSettingsPage(QWidget):
         buttons.addStretch(1)
 
         layout = QVBoxLayout(self)
+        level_layout = QHBoxLayout()
+        level_layout.setContentsMargins(0, 0, 0, 0)
+        level_layout.addWidget(QLabel("Minimum issue level"))
+        level_layout.addWidget(self.minimum_level_slider)
+        level_layout.addWidget(self.minimum_level_label)
+        level_layout.addStretch(1)
+        layout.addLayout(level_layout)
         layout.addWidget(self.rule_table, 1)
         layout.addLayout(buttons)
 
         self.rule_table.itemChanged.connect(self._item_changed)
         self._update_button_states()
+
+    def _minimum_level_changed(self, value: int) -> None:
+        if not 0 <= value < len(PROBE_ISSUE_LEVELS):
+            return
+        self.minimum_level_label.setText(PROBE_ISSUE_LEVELS[value])
+        self.changed.emit()
 
     def configuration(self) -> ProbeConfiguration:
         builtin_states: list[tuple[str, bool]] = []
@@ -233,7 +270,11 @@ class ProbingSettingsPage(QWidget):
                         enabled,
                     )
                 )
-        return ProbeConfiguration(tuple(builtin_states), tuple(custom_rules))
+        return ProbeConfiguration(
+            tuple(builtin_states),
+            tuple(custom_rules),
+            PROBE_ISSUE_LEVELS[self.minimum_level_slider.value()],
+        )
 
     def _append_rule(
         self,
