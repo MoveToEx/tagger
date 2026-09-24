@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QWheelEvent
 
 from tagger.ui.preview.config import (
@@ -233,6 +233,20 @@ def test_image_view_draws_source_pixel_grid(qtbot) -> None:
 
     assert rendered.pixelColor(7, 4).lightness() < 255
     assert rendered.pixelColor(4, 4) == QColor("white")
+
+
+def test_grid_badge_is_placed_outside_selection(qtbot) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    canvas = view._label
+    selection = QRectF(0, 0, 120, 80)
+    bounds = QRectF(0, 0, 320, 240)
+
+    badge = canvas._grid_badge_rect(selection, bounds, QSize(96, 24))
+
+    assert badge is not None
+    assert bounds.contains(badge)
+    assert not badge.intersects(selection)
 
 
 def test_preview_loader_ignores_stale_generation(qtbot, tmp_path: Path) -> None:

@@ -85,6 +85,65 @@ class _ImageCanvas(QLabel):
             draw_height,
         )
 
+    @staticmethod
+    def _grid_badge_rect(
+        selection_rect: QRectF,
+        bounds: QRectF,
+        badge_size: QSize,
+    ) -> QRectF | None:
+        """Return a badge position that does not cover the selected area."""
+        badge_width = float(badge_size.width())
+        badge_height = float(badge_size.height())
+        if (
+            badge_width <= 0
+            or badge_height <= 0
+            or badge_width > bounds.width()
+            or badge_height > bounds.height()
+        ):
+            return None
+
+        gap = 5.0
+        min_x = bounds.left()
+        max_x = bounds.right() - badge_width
+        min_y = bounds.top()
+        max_y = bounds.bottom() - badge_height
+
+        def clamp(value: float, lower: float, upper: float) -> float:
+            return max(lower, min(upper, value))
+
+        candidates = (
+            QRectF(
+                clamp(selection_rect.left(), min_x, max_x),
+                selection_rect.top() - gap - badge_height,
+                badge_width,
+                badge_height,
+            ),
+            QRectF(
+                clamp(selection_rect.left(), min_x, max_x),
+                selection_rect.bottom() + gap,
+                badge_width,
+                badge_height,
+            ),
+            QRectF(
+                selection_rect.left() - gap - badge_width,
+                clamp(selection_rect.top(), min_y, max_y),
+                badge_width,
+                badge_height,
+            ),
+            QRectF(
+                selection_rect.right() + gap,
+                clamp(selection_rect.top(), min_y, max_y),
+                badge_width,
+                badge_height,
+            ),
+        )
+        for candidate in candidates:
+            if bounds.contains(candidate) and not candidate.intersects(
+                selection_rect
+            ):
+                return candidate
+        return None
+
     def grid_cell_at(
         self, position: QPoint, *, clamp: bool = False
     ) -> tuple[int, int] | None:
@@ -215,16 +274,20 @@ class _ImageCanvas(QLabel):
                 painter.drawRect(selection_rect)
                 text = f"{selection_size[0]} x {selection_size[1]} grids"
                 text_rect = painter.fontMetrics().boundingRect(text)
-                badge = QRectF(
-                    selection_rect.left() + 5,
-                    selection_rect.top() + 5,
-                    text_rect.width() + 12,
-                    text_rect.height() + 8,
+                badge_size = QSize(text_rect.width() + 12, text_rect.height() + 8)
+                badge = self._grid_badge_rect(
+                    selection_rect,
+                    draw_rect,
+                    badge_size,
                 )
-                if badge.right() > draw_rect.right():
-                    badge.moveRight(draw_rect.right() - 3)
-                if badge.bottom() > draw_rect.bottom():
-                    badge.moveBottom(draw_rect.bottom() - 3)
+                if badge is None:
+                    badge = self._grid_badge_rect(
+                        selection_rect,
+                        QRectF(self.rect()),
+                        badge_size,
+                    )
+                if badge is None:
+                    return
                 painter.fillRect(badge, QColor(16, 24, 40, 220))
                 painter.setPen(QColor("white"))
                 painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, text)
