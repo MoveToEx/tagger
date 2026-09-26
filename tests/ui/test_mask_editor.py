@@ -446,7 +446,8 @@ def test_alpha_presets_and_outset_defaults_persist_between_images(qtbot, tmp_pat
         input_box.setValue(value)
     dialog.new_mask_alpha_buttons[2].click()
     assert dialog.new_mask_alpha_inputs[2].value() == 0.6
-    dialog.new_mask_outset_button.click()
+    dialog._set_new_mask_outset_enabled(True)
+    assert dialog.new_mask_outset_button.isChecked()
     assert dialog.new_mask_outset_button.accessibleName() == "New mask outset"
     assert dialog.new_mask_outset_button.icon().isNull() is False
     dialog.next_button.click()
@@ -460,11 +461,55 @@ def test_alpha_presets_and_outset_defaults_persist_between_images(qtbot, tmp_pat
 def test_outset_options_expose_width_units(qtbot) -> None:
     dialog = OutsetOptionsDialog("linear", 0.2, 12.0, "mask_percent")
     qtbot.addWidget(dialog)
+    assert not dialog.outset_enabled.isChecked()
+    assert not dialog.outset_style.isEnabled()
+    dialog.outset_enabled.setChecked(True)
     assert [dialog.outset_width_unit.itemText(index) for index in range(3)] == [
         "px", "% of image size", "% of mask size"
     ]
     assert dialog.outset_width_unit.currentData() == "mask_percent"
     assert dialog.values() == ("linear", 0.2, 12.0, "mask_percent")
+
+
+def test_outset_button_opens_options_on_left_click_only(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    opened: list[dict[str, object]] = []
+
+    class FakeCheckbox:
+        def isChecked(self) -> bool:
+            return True
+
+    class FakeDialog:
+        def __init__(self, style, destination_alpha, width, unit, parent, *, enabled):
+            self.outset_enabled = FakeCheckbox()
+            opened.append({
+                "style": style,
+                "destination_alpha": destination_alpha,
+                "width": width,
+                "unit": unit,
+                "parent": parent,
+                "enabled": enabled,
+            })
+
+        def exec(self) -> int:
+            return 1
+
+        def values(self) -> tuple[str, float, float, str]:
+            return "constant", 0.0, 0.0, "px"
+
+    monkeypatch.setattr(mask_editor_module, "OutsetOptionsDialog", FakeDialog)
+    dialog = MaskEditorDialog([_image(tmp_path / "a.png")])
+    qtbot.addWidget(dialog)
+    button = dialog.new_mask_outset_button
+
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(button, Qt.MouseButton.RightButton)
+
+    assert len(opened) == 1
+    assert opened[0]["enabled"] is False
+    assert dialog.new_mask_outset_enabled
+    assert button.isChecked()
 
 
 def test_drag_handle_starts_native_list_drag(qtbot, tmp_path, monkeypatch) -> None:

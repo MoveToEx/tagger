@@ -16,7 +16,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QDoubleSpinBox, QHBoxLayout,
-    QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressBar,
+    QCheckBox, QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressBar,
     QPushButton, QToolButton, QVBoxLayout, QWidget, QSlider, QComboBox,
     QDialogButtonBox, QFormLayout, QMenu, QRadioButton,
 )
@@ -31,6 +31,7 @@ from tagger.paths import PROJECT_ROOT
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
 from tagger.ui.widgets import (
     stabilize_checked_tool_button,
+    stabilize_checkbox,
     stabilize_radio_button,
     stabilize_widget_size,
 )
@@ -809,9 +810,14 @@ class OutsetOptionsDialog(QDialog):
         width: float,
         unit: str = "px",
         parent: QWidget | None = None,
+        *,
+        enabled: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Outset Options")
+        self.outset_enabled = QCheckBox("Enable outset")
+        self.outset_enabled.setChecked(enabled)
+        stabilize_checkbox(self.outset_enabled)
         self.outset_style = QComboBox()
         self.outset_style.addItem("Constant", "constant")
         self.outset_style.addItem("Linear fadeout", "linear")
@@ -837,12 +843,18 @@ class OutsetOptionsDialog(QDialog):
         width_layout.setContentsMargins(0, 0, 0, 0)
         width_layout.addWidget(self.outset_width)
         width_layout.addWidget(self.outset_width_unit)
-        form = QFormLayout(self); form.addRow("Outset style", self.outset_style); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Outset width", width_controls)
+        form = QFormLayout(self); form.addRow(self.outset_enabled); form.addRow("Outset style", self.outset_style); form.addRow("Destination alpha", self.destination_alpha); form.addRow("Outset width", width_controls)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
-        self.destination_alpha.setEnabled(True)
-        self.outset_width.setEnabled(True)
-        self.outset_width_unit.setEnabled(True)
+        self.outset_enabled.toggled.connect(self._update_enabled)
+        self._update_enabled()
+
+    def _update_enabled(self, *_args: object) -> None:
+        enabled = self.outset_enabled.isChecked()
+        self.outset_style.setEnabled(enabled)
+        self.destination_alpha.setEnabled(enabled)
+        self.outset_width.setEnabled(enabled)
+        self.outset_width_unit.setEnabled(enabled)
 
     def values(self) -> tuple[str, float, float, str]:
         return (
@@ -970,12 +982,14 @@ class MaskEditorDialog(QDialog):
         self.new_mask_outset_button.setIconSize(QSize(22, 22))
         self.new_mask_outset_button.setFixedSize(34, 34)
         self.new_mask_outset_button.setCheckable(True)
+        self.new_mask_outset_button.setChecked(self.new_mask_outset_enabled)
         self.new_mask_outset_button.setAccessibleName("New mask outset")
-        self.new_mask_outset_button.setToolTip("Enable outset for newly drawn masks (right-click to configure)")
+        self.new_mask_outset_button.setToolTip("Configure outset for newly drawn masks")
         stabilize_checked_tool_button(self.new_mask_outset_button)
-        self.new_mask_outset_button.toggled.connect(self._set_new_mask_outset_enabled)
-        self.new_mask_outset_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.new_mask_outset_button.customContextMenuRequested.connect(self._edit_new_mask_properties)
+        self.new_mask_outset_button.clicked.connect(self._edit_new_mask_properties)
+        self.new_mask_outset_button.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.PreventContextMenu
+        )
         outset_row = QHBoxLayout()
         outset_row.addWidget(self.new_mask_outset_button)
         outset_row.addStretch()
@@ -1109,20 +1123,26 @@ class MaskEditorDialog(QDialog):
 
     def _set_new_mask_outset_enabled(self, enabled: bool) -> None:
         self.new_mask_outset_enabled = enabled
+        self.new_mask_outset_button.setChecked(enabled)
 
-    def _edit_new_mask_properties(self, _position) -> None:
+    def _edit_new_mask_properties(self, _checked: bool = False) -> None:
+        # A checkable command button toggles itself before emitting clicked.
+        # Restore the committed state while the options dialog is open.
+        self.new_mask_outset_button.setChecked(self.new_mask_outset_enabled)
         dialog = OutsetOptionsDialog(
-            self.new_mask_outset_style, self.new_mask_destination_alpha,
+            self.new_mask_outset_style,
+            self.new_mask_destination_alpha,
             self.new_mask_outset_width, self.new_mask_outset_width_unit, self,
+            enabled=self.new_mask_outset_enabled,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         mode, destination, width, unit = dialog.values()
+        self._set_new_mask_outset_enabled(dialog.outset_enabled.isChecked())
         self.new_mask_outset_style = mode
         self.new_mask_destination_alpha = destination
         self.new_mask_outset_width = width
         self.new_mask_outset_width_unit = unit
-        self.new_mask_outset_button.setChecked(True)
 
     def _set_base_alpha(self, alpha: float) -> None:
         self._base_alpha = alpha
