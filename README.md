@@ -11,7 +11,7 @@ An image tagging app based on PySide6, intended to assist in small-scale image d
 ```sh
 $ git clone https://github.com/MoveToEx/tagger.git
 $ cd tagger
-$ uv sync --all-groups    # if AI tagging or VAE preview is needed
+$ uv sync --all-groups    # if AI tagging is needed
 $ uv sync                 # without model-backed features
 $ uv run python ./main.py
 ```
@@ -103,12 +103,6 @@ _Image_ > _Crop_ allows you to crop the image according to ARB settings or a spe
 In ARB mode, it finds one bucket with the closest aspect ratio, and upscales proportionally to fit the image.  
 
 Respects global ARB settings.
-
-#### VAE preview
-
-_Image_ > _VAE Preview_ encodes the current image with VAE and decodes it back to pixels, so as to show how it looks if it were generated entirely by the model. 
-
-This step could be slow on some machines and is generally not necessary.  
 
 #### Grid preview
 
@@ -204,7 +198,6 @@ In pixel transform dialog:
 tagger/
   domain/          Image models, tag operations, traversal and review sessions
   ai_tagging/      Dependency checks, model caching/downloads, inference and dialogs
-  vae_preview/     VAE child-process controller and worker
   settings/        JSON storage, preferences, proxy configuration and settings UI
   tag_library/     Binary storage, search index, downloads and completion widgets
   ui/
