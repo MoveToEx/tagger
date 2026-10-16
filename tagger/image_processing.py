@@ -50,10 +50,30 @@ def _exclusive_alpha(image: QImage) -> QImage:
     return alpha_image.convertToFormat(QImage.Format.Format_RGB32)
 
 
+def _invert_alpha(image: QImage) -> QImage:
+    if not image.hasAlphaChannel():
+        return image
+
+    source = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    pixels = np.frombuffer(source.bits(), dtype=np.uint8).reshape(
+        source.height(), source.bytesPerLine() // 4, 4
+    )[:, : source.width(), :].copy()
+    pixels[:, :, 3] = 255 - pixels[:, :, 3]
+    inverted = QImage(
+        pixels.data,
+        source.width(),
+        source.height(),
+        source.width() * 4,
+        QImage.Format.Format_RGBA8888,
+    ).copy()
+    return inverted
+
+
 ALPHA_DISPLAY_FILTERS: dict[str, ImageFilter] = {
     "keep": _keep,
     "ignore": _ignore_alpha,
     "exclusive": _exclusive_alpha,
+    "invert": _invert_alpha,
 }
 
 

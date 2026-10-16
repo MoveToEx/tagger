@@ -11,10 +11,22 @@ from tagger.ui.preview.config import (
     SCROLL_PAN,
     SCROLL_ZOOM,
 )
+from tagger.image_processing import apply_alpha_display_filter
 from tagger.ui.preview.loader import PreviewLoader
 from tagger.ui.preview.view import ImageView
 
 from .helpers import create_png
+
+
+def test_invert_alpha_display_filter_inverts_only_alpha() -> None:
+    image = QImage(2, 1, QImage.Format.Format_RGBA8888)
+    image.setPixelColor(0, 0, QColor(10, 20, 30, 0))
+    image.setPixelColor(1, 0, QColor(40, 50, 60, 255))
+
+    inverted = apply_alpha_display_filter(image, "invert")
+
+    assert inverted.pixelColor(0, 0) == QColor(10, 20, 30, 255)
+    assert inverted.pixelColor(1, 0) == QColor(40, 50, 60, 0)
 
 
 def test_ctrl_wheel_keeps_zoom_override(qtbot) -> None:

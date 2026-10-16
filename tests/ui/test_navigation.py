@@ -56,6 +56,7 @@ def test_view_alpha_modes_and_image_editing_action_group(qtbot, tmp_path: Path) 
         window.commands.remove_transparency_action, window.commands.mask_editor_action,
     ]
     assert not alpha_menu.isEnabled()
+    assert window.commands.alpha_actions["invert"].text() == "Invert"
     create_png(tmp_path / "sample.png")
     window.folders._load_directory(tmp_path, show_issues=False)
     assert alpha_menu.isEnabled()
@@ -64,6 +65,10 @@ def test_view_alpha_modes_and_image_editing_action_group(qtbot, tmp_path: Path) 
     assert window.image_view.alpha_mode == "ignore"
     assert window.commands.alpha_actions["ignore"].isChecked()
     assert not window.commands.alpha_actions["keep"].isChecked()
+    window.commands.alpha_actions["invert"].trigger()
+    assert window.image_view.alpha_mode == "invert"
+    assert window.commands.alpha_actions["invert"].isChecked()
+    assert not window.commands.alpha_actions["ignore"].isChecked()
 
 
 def test_toolbar_uses_navigation_and_zoom_icons(
