@@ -48,6 +48,9 @@ def test_view_alpha_modes_and_image_editing_action_group(qtbot, tmp_path: Path) 
     assert alpha_menu.menuAction() not in image_menu.actions()
     actions = alpha_menu.actions()
     assert actions == list(window.commands.alpha_actions.values())
+    assert [action.text() for action in actions] == [
+        "Auto", "Keep", "Invert", "Ignore", "Overlay", "Exclusive"
+    ]
     image_actions = image_menu.actions()
     assert image_actions[-5].isSeparator()
     assert image_actions[-4] == window.commands.crop_action
@@ -57,6 +60,8 @@ def test_view_alpha_modes_and_image_editing_action_group(qtbot, tmp_path: Path) 
     ]
     assert not alpha_menu.isEnabled()
     assert window.commands.alpha_actions["invert"].text() == "Invert"
+    assert window.commands.alpha_actions["overlay"].text() == "Overlay"
+    assert window.commands.alpha_actions["auto"].text() == "Auto"
     create_png(tmp_path / "sample.png")
     window.folders._load_directory(tmp_path, show_issues=False)
     assert alpha_menu.isEnabled()
@@ -69,6 +74,14 @@ def test_view_alpha_modes_and_image_editing_action_group(qtbot, tmp_path: Path) 
     assert window.image_view.alpha_mode == "invert"
     assert window.commands.alpha_actions["invert"].isChecked()
     assert not window.commands.alpha_actions["ignore"].isChecked()
+    window.commands.alpha_actions["overlay"].trigger()
+    assert window.image_view.alpha_mode == "overlay"
+    assert window.commands.alpha_actions["overlay"].isChecked()
+    assert not window.commands.alpha_actions["invert"].isChecked()
+    window.commands.alpha_actions["auto"].trigger()
+    assert window.image_view.alpha_mode == "auto"
+    assert window.commands.alpha_actions["auto"].isChecked()
+    assert not window.commands.alpha_actions["overlay"].isChecked()
 
 
 def test_toolbar_uses_navigation_and_zoom_icons(

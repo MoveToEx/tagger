@@ -397,7 +397,14 @@ class WindowActions:
         if self.alpha_menu is not None:
             return
         self.alpha_menu = view_menu.addMenu("Alpha")
-        labels = {"keep": "Keep", "ignore": "Ignore", "exclusive": "Exclusive"}
+        labels = {
+            "auto": "Auto",
+            "keep": "Keep",
+            "invert": "Invert",
+            "ignore": "Ignore",
+            "overlay": "Overlay",
+            "exclusive": "Exclusive",
+        }
         for mode in ALPHA_DISPLAY_FILTERS:
             labels.setdefault(mode, mode.replace("_", " ").title())
         for mode, label in labels.items():

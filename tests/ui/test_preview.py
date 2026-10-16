@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QWheelEvent
 
@@ -27,6 +29,114 @@ def test_invert_alpha_display_filter_inverts_only_alpha() -> None:
 
     assert inverted.pixelColor(0, 0) == QColor(10, 20, 30, 255)
     assert inverted.pixelColor(1, 0) == QColor(40, 50, 60, 0)
+
+
+@pytest.mark.parametrize("alpha", [0, 64, 128, 192, 255])
+def test_overlay_alpha_blends_red_over_opaque_rgb(alpha: int) -> None:
+    image = QImage(3, 2, QImage.Format.Format_RGBA8888)
+    original = QColor(25, 75, 125, alpha)
+    image.fill(original)
+
+    result = apply_alpha_display_filter(image, "overlay")
+
+    opacity = 0.8 * alpha / 255
+    expected_rgb = (
+        round(255 * opacity + 25 * (1 - opacity)),
+        round(75 * (1 - opacity)),
+        round(125 * (1 - opacity)),
+    )
+    assert result.size() == image.size()
+    for y in range(result.height()):
+        for x in range(result.width()):
+            actual = result.pixelColor(x, y)
+            assert actual.alpha() == 255
+            assert (actual.red(), actual.green(), actual.blue()) == pytest.approx(
+                expected_rgb, abs=1
+            )
+            assert image.pixelColor(x, y) == original
+
+
+def test_overlay_alpha_treats_images_without_alpha_as_opaque() -> None:
+    image = QImage(3, 2, QImage.Format.Format_RGB888)
+    image.fill(QColor(25, 75, 125))
+
+    result = apply_alpha_display_filter(image, "overlay")
+
+    assert result.pixelColor(0, 0) == QColor(209, 15, 25)
+    assert image.pixelColor(0, 0) == QColor(25, 75, 125)
+
+
+def test_overlay_alpha_preview_updates_existing_and_new_images(qtbot) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    image = QImage(2, 1, QImage.Format.Format_RGBA8888)
+    image.fill(QColor(0, 0, 255, 0))
+    view.set_image(image)
+
+    view.set_alpha_mode("overlay")
+
+    assert view._pixmap is not None
+    assert view._pixmap.toImage().pixelColor(0, 0) == QColor(0, 0, 255)
+    image.fill(QColor(0, 255, 0, 255))
+    view.set_image(image)
+    assert view._pixmap.toImage().pixelColor(0, 0) == QColor(204, 51, 0)
+    view.set_alpha_mode("keep")
+    assert view._source_image == image
+
+
+def test_auto_alpha_keeps_images_without_alpha() -> None:
+    image = QImage(3, 2, QImage.Format.Format_RGB888)
+    image.fill(QColor(25, 75, 125))
+
+    assert apply_alpha_display_filter(image, "auto") == image
+
+
+@pytest.mark.parametrize("alpha", [0, 128, 254, 255])
+@pytest.mark.parametrize(
+    "image_format",
+    [QImage.Format.Format_RGBA8888, QImage.Format.Format_ARGB32_Premultiplied],
+)
+def test_auto_alpha_uses_overlay_only_when_a_pixel_is_transparent(
+    alpha: int, image_format: QImage.Format
+) -> None:
+    image = QImage(3, 2, image_format)
+    image.fill(QColor(25, 75, 125, 255))
+    image.setPixelColor(2, 1, QColor(25, 75, 125, alpha))
+    original = image.copy()
+
+    result = apply_alpha_display_filter(image, "auto")
+
+    if alpha == 255:
+        assert result == image
+    else:
+        assert result.pixelColor(0, 0) == QColor(209, 15, 25)
+        assert result.pixelColor(2, 1).alpha() == 255
+    assert image == original
+
+
+def test_auto_alpha_preview_rechecks_transparency_between_images(qtbot) -> None:
+    view = ImageView()
+    qtbot.addWidget(view)
+    image = QImage(2, 1, QImage.Format.Format_RGBA8888)
+    image.fill(QColor(0, 255, 0, 255))
+    view.set_image(image)
+    view.set_alpha_mode("auto")
+
+    assert view._pixmap is not None
+    assert view._pixmap.toImage().pixelColor(0, 0) == QColor(0, 255, 0)
+
+    transparent_image = image.copy()
+    transparent_image.setPixelColor(1, 0, QColor(0, 0, 255, 0))
+    view.set_image(transparent_image)
+    assert view.alpha_mode == "auto"
+    assert view._pixmap.toImage().pixelColor(0, 0) == QColor(204, 51, 0)
+    assert view._pixmap.toImage().pixelColor(1, 0) == QColor(0, 0, 255)
+
+    view.set_image(image)
+    assert view._pixmap.toImage().pixelColor(0, 0) == QColor(0, 255, 0)
+    view.set_image(image.convertToFormat(QImage.Format.Format_RGB32))
+    assert view._pixmap.toImage().pixelColor(0, 0) == QColor(0, 255, 0)
+    assert view.alpha_mode == "auto"
 
 
 def test_ctrl_wheel_keeps_zoom_override(qtbot) -> None:

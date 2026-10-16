@@ -69,11 +69,48 @@ def _invert_alpha(image: QImage) -> QImage:
     return inverted
 
 
+def _overlay_alpha(image: QImage) -> QImage:
+    if image.isNull():
+        return image
+
+    source = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    pixels = np.frombuffer(source.constBits(), dtype=np.uint8).reshape(
+        source.height(), source.bytesPerLine() // 4, 4
+    )[:, : source.width(), :]
+    overlay = QImage(source.size(), QImage.Format.Format_RGBA8888)
+    overlay.fill(QColor("red"))
+    overlay_pixels = np.frombuffer(overlay.bits(), dtype=np.uint8).reshape(
+        overlay.height(), overlay.bytesPerLine() // 4, 4
+    )[:, : overlay.width(), :]
+    overlay_pixels[:, :, 3] = np.rint(pixels[:, :, 3] * 0.8)
+
+    result = source.convertToFormat(QImage.Format.Format_RGB32)
+    painter = QPainter(result)
+    painter.drawImage(0, 0, overlay)
+    painter.end()
+    return result
+
+
+def _auto_alpha(image: QImage) -> QImage:
+    if image.isNull() or not image.hasAlphaChannel():
+        return _keep(image)
+
+    source = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    pixels = np.frombuffer(source.constBits(), dtype=np.uint8).reshape(
+        source.height(), source.bytesPerLine() // 4, 4
+    )[:, : source.width(), 3]
+    if np.any(pixels < 255):
+        return _overlay_alpha(image)
+    return _keep(image)
+
+
 ALPHA_DISPLAY_FILTERS: dict[str, ImageFilter] = {
     "keep": _keep,
     "ignore": _ignore_alpha,
     "exclusive": _exclusive_alpha,
     "invert": _invert_alpha,
+    "overlay": _overlay_alpha,
+    "auto": _auto_alpha,
 }
 
 
