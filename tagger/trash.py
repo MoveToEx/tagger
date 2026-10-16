@@ -26,3 +26,11 @@ def delete_file(path: Path, behavior: str) -> bool:
         path.unlink()
         return True
     raise ValueError(f"Unsupported deletion behavior: {behavior}")
+
+
+def remove_empty_folder(path: Path) -> bool:
+    """Remove *path* when it is an empty directory."""
+    if not path.is_dir():
+        return False
+    path.rmdir()
+    return True

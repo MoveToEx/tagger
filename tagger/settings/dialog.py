@@ -49,6 +49,10 @@ from tagger.settings.preferences import (
     PARENTHESES_SETTING,
     PROXY_MODE_SETTING,
     PROXY_SETTING,
+    REMOVE_EMPTY_FOLDER_ALWAYS,
+    REMOVE_EMPTY_FOLDER_ASK,
+    REMOVE_EMPTY_FOLDER_NEVER,
+    REMOVE_EMPTY_FOLDER_SETTING,
     SCRIPTING_PLAIN_SET,
     SCRIPTING_TAG_SET,
     SCRIPTING_TAGS_TYPE_SETTING,
@@ -70,6 +74,7 @@ from tagger.settings.preferences import (
     get_grid_type,
     get_image_prefetch_count,
     get_preprocess_options,
+    get_remove_empty_folder_behavior,
     get_scripting_tags_type,
     get_scrolling_behavior,
     get_use_unlink,
@@ -174,6 +179,9 @@ class SettingsDialog(QDialog):
             ),
             get_use_unlink(self.settings, USE_UNLINK_FOR_TIDY_SETTING),
             get_use_unlink(self.settings, USE_UNLINK_FOR_DEDUPLICATE_SETTING),
+        )
+        self._applied_remove_empty_folder_behavior = (
+            get_remove_empty_folder_behavior(self.settings)
         )
         self.setWindowTitle("Settings")
         self.resize(760, 520)
@@ -345,6 +353,21 @@ class SettingsDialog(QDialog):
         )
         self.click_hold_behavior_input.setCurrentIndex(selected_index)
 
+        self.remove_empty_folder_input = QComboBox()
+        self.remove_empty_folder_input.addItem(
+            "Always", REMOVE_EMPTY_FOLDER_ALWAYS
+        )
+        self.remove_empty_folder_input.addItem(
+            "Never", REMOVE_EMPTY_FOLDER_NEVER
+        )
+        self.remove_empty_folder_input.addItem("Ask", REMOVE_EMPTY_FOLDER_ASK)
+        self.remove_empty_folder_input.setCurrentIndex(
+            self.remove_empty_folder_input.findData(
+                self._applied_remove_empty_folder_behavior
+            )
+        )
+        stabilize_widget_size(self.remove_empty_folder_input)
+
         # Keep the old attribute names as lightweight compatibility views for
         # integrations that inspect the pre-merged settings groups.
         self.scrolling_behavior_group = _LegacyGroupAlias(
@@ -359,6 +382,9 @@ class SettingsDialog(QDialog):
         behavior_form.addRow("Mouse wheel", self.scrolling_behavior_input)
         behavior_form.addRow(
             "Image catalog click and hold", self.click_hold_behavior_input
+        )
+        behavior_form.addRow(
+            "Remove empty folder", self.remove_empty_folder_input
         )
 
         self.traversal_group = QGroupBox("Traversal")
@@ -440,6 +466,9 @@ class SettingsDialog(QDialog):
             self._settings_changed
         )
         self.click_hold_behavior_input.currentIndexChanged.connect(
+            self._settings_changed
+        )
+        self.remove_empty_folder_input.currentIndexChanged.connect(
             self._settings_changed
         )
         self.image_prefetch_count_input.valueChanged.connect(
@@ -805,6 +834,8 @@ class SettingsDialog(QDialog):
             self._scrolling_behavior() != self._applied_scrolling_behavior
             or self._catalog_click_hold_behavior()
             != self._applied_catalog_click_hold_behavior
+            or self._remove_empty_folder_behavior()
+            != self._applied_remove_empty_folder_behavior
             or self.image_prefetch_count_input.value()
             != self._applied_image_prefetch_count
             or self._preprocess_options()
@@ -840,6 +871,10 @@ class SettingsDialog(QDialog):
             if isinstance(behavior, str)
             else CATALOG_DRAG_AND_DROP
         )
+
+    def _remove_empty_folder_behavior(self) -> str:
+        behavior = self.remove_empty_folder_input.currentData()
+        return behavior if isinstance(behavior, str) else REMOVE_EMPTY_FOLDER_NEVER
 
     def _use_unlink_options(self) -> tuple[bool, bool, bool, bool]:
         return (
@@ -888,6 +923,7 @@ class SettingsDialog(QDialog):
     def _apply(self) -> None:
         scrolling_behavior = self._scrolling_behavior()
         catalog_click_hold_behavior = self._catalog_click_hold_behavior()
+        remove_empty_folder_behavior = self._remove_empty_folder_behavior()
         image_prefetch_count = self.image_prefetch_count_input.value()
         preprocess_options = self._preprocess_options()
         grid_type = self._grid_type()
@@ -905,6 +941,9 @@ class SettingsDialog(QDialog):
         self.settings.setValue(
             CATALOG_CLICK_HOLD_BEHAVIOR_SETTING,
             catalog_click_hold_behavior,
+        )
+        self.settings.setValue(
+            REMOVE_EMPTY_FOLDER_SETTING, remove_empty_folder_behavior
         )
         self.settings.setValue(
             IMAGE_PREFETCH_COUNT_SETTING,
@@ -977,6 +1016,7 @@ class SettingsDialog(QDialog):
         )
         self._applied_scrolling_behavior = scrolling_behavior
         self._applied_catalog_click_hold_behavior = catalog_click_hold_behavior
+        self._applied_remove_empty_folder_behavior = remove_empty_folder_behavior
         self._applied_image_prefetch_count = image_prefetch_count
         self._applied_preprocess_options = preprocess_options
         self._applied_grid_type = grid_type

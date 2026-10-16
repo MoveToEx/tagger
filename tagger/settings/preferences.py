@@ -33,6 +33,7 @@ USE_UNLINK_FOR_DELETE_FILTER_SETTING = "general/use_unlink_for_delete_filter"
 USE_UNLINK_FOR_MANUAL_DELETE_SETTING = "general/use_unlink_for_manual_delete"
 USE_UNLINK_FOR_TIDY_SETTING = "general/use_unlink_for_tidy"
 USE_UNLINK_FOR_DEDUPLICATE_SETTING = "general/use_unlink_for_deduplicate"
+REMOVE_EMPTY_FOLDER_SETTING = "general/remove_empty_folder"
 PROXY_SETTING = "network/http_proxy"
 PROXY_MODE_SETTING = "network/proxy_mode"
 SCRIPTING_TAGS_TYPE_SETTING = "scripting/tags_type"
@@ -63,6 +64,18 @@ CATALOG_CLICK_HOLD_BEHAVIORS = {
     CATALOG_NAVIGATE,
 }
 DEFAULT_CATALOG_CLICK_HOLD_BEHAVIOR = CATALOG_DRAG_AND_DROP
+
+REMOVE_EMPTY_FOLDER_ALWAYS = "always"
+REMOVE_EMPTY_FOLDER_NEVER = "never"
+REMOVE_EMPTY_FOLDER_ASK = "ask"
+REMOVE_EMPTY_FOLDER_BEHAVIORS = {
+    REMOVE_EMPTY_FOLDER_ALWAYS,
+    REMOVE_EMPTY_FOLDER_NEVER,
+    REMOVE_EMPTY_FOLDER_ASK,
+}
+DEFAULT_REMOVE_EMPTY_FOLDER_BEHAVIOR = REMOVE_EMPTY_FOLDER_NEVER
+# Compatibility alias for integrations that use the longer setting name.
+REMOVE_EMPTY_FOLDER_BEHAVIOR_SETTING = REMOVE_EMPTY_FOLDER_SETTING
 
 SCRIPTING_TAG_SET = "tag_set"
 SCRIPTING_PLAIN_SET = "set"
@@ -161,6 +174,17 @@ def get_grid_type(settings: JsonSettings) -> str:
 def get_use_unlink(settings: JsonSettings, key: str) -> bool:
     use_unlink = settings.value(key, False, type=bool)
     return use_unlink if isinstance(use_unlink, bool) else False
+
+
+def get_remove_empty_folder_behavior(settings: JsonSettings) -> str:
+    behavior = settings.value(
+        REMOVE_EMPTY_FOLDER_SETTING,
+        DEFAULT_REMOVE_EMPTY_FOLDER_BEHAVIOR,
+        type=str,
+    )
+    if isinstance(behavior, str) and behavior in REMOVE_EMPTY_FOLDER_BEHAVIORS:
+        return behavior
+    return DEFAULT_REMOVE_EMPTY_FOLDER_BEHAVIOR
 
 
 def get_scripting_tags_type(settings: JsonSettings) -> str:

@@ -26,6 +26,7 @@ from tagger.storage import (
 from tagger.trash import UNLINK, delete_file
 from tagger.ui.dialogs.archive import ArchiveDialog, ArchiveProgressDialog
 from tagger.ui.dialogs.tidy import TidyDialog
+from tagger.ui.main_window.empty_folders import maybe_remove_empty_folder
 
 
 if TYPE_CHECKING:
@@ -540,6 +541,13 @@ class FileActions:
                     deleted.append(entry.tag_path)
 
         if deleted:
+            if image_deleted and not entry.tag_path.exists():
+                maybe_remove_empty_folder(
+                    entry.image_path.parent,
+                    root_directory=self.window.directory,
+                    settings=self.window.settings,
+                    parent=self.window,
+                )
             self.window.folders._load_directory(
                 self.window.directory,
                 preferred_image=preferred_path,

@@ -45,6 +45,7 @@ from tagger.ui.dialogs.transparency import (
     TransparencyProgressDialog,
     TransparencySelectionDialog,
 )
+from tagger.ui.main_window.empty_folders import maybe_remove_empty_folder
 
 
 if TYPE_CHECKING:
@@ -106,6 +107,13 @@ class DialogController:
             dialog.exec() == DeleteFilterDialog.DialogCode.Accepted
             and dialog.commit_result is not None
         ):
+            for image_path in dialog.commit_result.deleted_images:
+                maybe_remove_empty_folder(
+                    image_path.parent,
+                    root_directory=self.window.directory,
+                    settings=self.window.settings,
+                    parent=self.window,
+                )
             self.window.folders._load_directory(
                 self.window.directory,
                 preferred_image=current.image_path if current else None,
@@ -140,6 +148,13 @@ class DialogController:
             dialog.exec() == DeduplicateDialog.DialogCode.Accepted
             and dialog.commit_result is not None
         ):
+            for image_path in dialog.commit_result.deleted_images:
+                maybe_remove_empty_folder(
+                    image_path.parent,
+                    root_directory=self.window.directory,
+                    settings=self.window.settings,
+                    parent=self.window,
+                )
             self.window.folders._load_directory(
                 self.window.directory,
                 preferred_image=current.image_path if current else None,
