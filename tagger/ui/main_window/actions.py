@@ -376,7 +376,12 @@ class WindowActions:
         any_editable = any(entry.editable for entry in self.window.catalog.entries)
         self.bulk_operation_action.setEnabled(any_editable)
         ai_available = ai_dependencies_available()
-        self.ai_tagging_action.setEnabled(ai_available and any_editable)
+        self.ai_tagging_action.setEnabled(
+            ai_available
+            and any_editable
+            and self.window.dialogs._ai_tagging_progress_dialog is None
+            and self.window.dialogs._ai_tagging_review_dialog is None
+        )
         for action in self.folder_tag_actions.values():
             action.setEnabled(any_editable)
         self.normalize_action.setEnabled(any_editable)

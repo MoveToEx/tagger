@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
@@ -598,3 +599,139 @@ class AITaggingDialog(QDialog):
             event.accept()
         else:
             event.ignore()
+
+
+@dataclass(frozen=True)
+class AITaggingParameters:
+    """Inference settings selected before an AI tagging run starts."""
+
+    repository_id: str
+    general_threshold: float
+    character_threshold: float
+
+
+class AITaggingSelectionDialog(AITaggingDialog):
+    """Choose images and inference settings before starting an AI run."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.parameters: AITaggingParameters | None = None
+        self.selected_entries: list[ImageEntry] = []
+
+    def _start_inference(self) -> None:
+        entries = self._checked_entries()
+        repository_id = self.model_input.currentData()
+        if not entries or not isinstance(repository_id, str):
+            return
+        self.selected_entries = entries
+        self.parameters = AITaggingParameters(
+            repository_id,
+            self.general_threshold_input.value(),
+            self.character_threshold_input.value(),
+        )
+        self.accept()
+
+
+class AITaggingProgressDialog(AITaggingDialog):
+    """Run inference in a separate progress dialog."""
+
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        entries: list[ImageEntry],
+        parameters: AITaggingParameters,
+        parent=None,
+        *,
+        proxy: str | None = None,
+    ) -> None:
+        super().__init__(entries, parent, proxy=proxy)
+        self.setWindowTitle("AI Tagging Inference")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self._selected_entries = list(entries)
+        self._parameters = parameters
+        self._running = False
+
+        self.pages.setCurrentWidget(self.progress_page)
+
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self.inference_progress.setRange(0, len(self._selected_entries))
+        self.inference_progress.setValue(0)
+        self.inference_status.setText("Preparing inference...")
+        process = _InferenceProcess(
+            [entry.image_path for entry in self._selected_entries],
+            self._parameters.repository_id,
+            self._parameters.general_threshold,
+            self._parameters.character_threshold,
+            self._proxy,
+            cache._preferred_model_cache_directory(
+                self._parameters.repository_id
+            ),
+            self,
+        )
+        process.progress.connect(self._inference_progressed)
+        process.completed.connect(self._inference_completed)
+        process.failed.connect(self._inference_failed)
+        self._inference_process = process
+        process.start()
+
+    def _inference_completed(self, results: object) -> None:
+        self._release_inference_process()
+        self._running = False
+        normalized = dict(results) if isinstance(results, dict) else {}
+        self.accept()
+        self.completed.emit(normalized)
+
+    def _inference_failed(self, message: str) -> None:
+        self._release_inference_process()
+        self._running = False
+        self.reject()
+        self.failed.emit(message)
+
+    @override
+    def reject(self) -> None:
+        if not self._running:
+            super().reject()
+
+    @override
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._running:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+
+class AITaggingReviewDialog(AITaggingDialog):
+    """Review inferred tags and commit the user's choices."""
+
+    def __init__(
+        self,
+        entries: list[ImageEntry],
+        results: dict[str, list[tuple[str, float]]],
+        parent=None,
+        *,
+        root_directory: Path | None = None,
+        image_prefetch_count: int = DEFAULT_IMAGE_PREFETCH_COUNT,
+    ) -> None:
+        super().__init__(
+            entries,
+            parent,
+            root_directory=root_directory,
+            image_prefetch_count=image_prefetch_count,
+        )
+        self.setWindowTitle("Review AI Tags")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self._selected_entries = list(entries)
+        self._results = results
+        self._selected_additions.clear()
+        self._current_index = 0
+        self.pages.setCurrentWidget(self.review_page)
+        self._load_current()

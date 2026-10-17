@@ -10,9 +10,15 @@ from PySide6.QtCore import QPoint, QProcess, Qt
 import tagger.ai_tagging.cache as ai_cache
 import tagger.ai_tagging.dependencies as ai_dependencies
 import tagger.ai_tagging.inference as ai_inference
-from tagger.ai_tagging.dialog import AITaggingDialog
+from tagger.ai_tagging.dialog import (
+    AITaggingDialog,
+    AITaggingParameters,
+    AITaggingProgressDialog,
+    AITaggingSelectionDialog,
+)
 from tagger.ai_tagging.model_dialog import ModelManagementDialog
 import tagger.ai_tagging.model_dialog as model_dialog_module
+import tagger.ui.main_window.dialogs as dialogs_module
 from tagger.ai_tagging.models import AI_DEPENDENCIES, MODEL_REPOSITORIES
 from tagger.domain.models import ImageEntry
 
@@ -331,4 +337,54 @@ def test_ai_tagger_apply_all_ignores_tag_decisions(
     )
     assert (tmp_path / "second.txt").read_text(encoding="utf-8") == (
         "dog, third\n"
+    )
+
+
+def test_ai_tagger_transitions_through_selection_progress_and_review(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    image_path = tmp_path / "image.png"
+    create_png(image_path)
+    entry = ImageEntry(
+        image_path,
+        image_path.with_suffix(".txt"),
+        source_bytes=b"",
+    )
+
+    from tagger.ui.main_window.window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    monkeypatch.setattr(
+        dialogs_module, "ai_dependencies_available", lambda: True
+    )
+
+    def accept_selection(dialog: AITaggingSelectionDialog) -> int:
+        dialog.selected_entries = [entry]
+        dialog.parameters = AITaggingParameters("example/model", 0.35, 0.75)
+        return AITaggingSelectionDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(AITaggingSelectionDialog, "exec", accept_selection)
+
+    def complete_inference(dialog: AITaggingProgressDialog) -> None:
+        dialog._inference_completed(
+            {str(image_path): [("cat", 0.9)]}
+        )
+
+    monkeypatch.setattr(AITaggingProgressDialog, "start", complete_inference)
+
+    window.dialogs._open_ai_tagging()
+
+    qtbot.waitUntil(
+        lambda: window.dialogs._ai_tagging_review_dialog is not None
+    )
+    review_dialog = window.dialogs._ai_tagging_review_dialog
+    assert review_dialog is not None
+    assert review_dialog.isVisible()
+    assert review_dialog.ai_tags.count() == 1
+
+    review_dialog.reject()
+    qtbot.waitUntil(
+        lambda: window.dialogs._ai_tagging_review_dialog is None
     )

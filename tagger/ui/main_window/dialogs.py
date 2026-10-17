@@ -7,7 +7,11 @@ from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QMessageBox
 
 from tagger.ai_tagging.dependencies import ai_dependencies_available
-from tagger.ai_tagging.dialog import AITaggingDialog
+from tagger.ai_tagging.dialog import (
+    AITaggingProgressDialog,
+    AITaggingReviewDialog,
+    AITaggingSelectionDialog,
+)
 from tagger.domain.models import TagOperation
 from tagger.probing import (
     ProbeResult,
@@ -60,6 +64,8 @@ class DialogController:
         self._complex_filter_dialog: ComplexFilterDialog | None = None
         self._probe_progress_dialog: ProbeProgressDialog | None = None
         self._probe_dialog: ProbeDialog | None = None
+        self._ai_tagging_progress_dialog: AITaggingProgressDialog | None = None
+        self._ai_tagging_review_dialog: AITaggingReviewDialog | None = None
 
     def _open_global_search(self, *, initial_pattern: str = "") -> None:
         if not self.window.catalog.entries:
@@ -483,7 +489,7 @@ class DialogController:
         ):
             return
         current = self.window._current_entry()
-        dialog = AITaggingDialog(
+        dialog = AITaggingSelectionDialog(
             editable_entries,
             self.window,
             root_directory=self.window.directory,
@@ -491,10 +497,90 @@ class DialogController:
             image_prefetch_count=get_image_prefetch_count(self.window.settings),
             initial_image_path=initial_image_path,
         )
-        if dialog.exec() == AITaggingDialog.DialogCode.Accepted:
+        if dialog.exec() != AITaggingSelectionDialog.DialogCode.Accepted:
+            return
+        parameters = dialog.parameters
+        selected_entries = dialog.selected_entries
+        if parameters is None or not selected_entries:
+            return
+
+        progress_dialog = AITaggingProgressDialog(
+            selected_entries,
+            parameters,
+            self.window,
+            proxy=get_download_proxy(self.window.settings),
+        )
+        progress_dialog.completed.connect(
+            lambda results, progress=progress_dialog, entries=selected_entries:
+            self._ai_tagging_inference_completed(
+                progress, entries, results, current
+            )
+        )
+        progress_dialog.failed.connect(
+            lambda message, progress=progress_dialog:
+            self._ai_tagging_inference_failed(progress, message)
+        )
+        self._ai_tagging_progress_dialog = progress_dialog
+        self.window.commands._update_action_states()
+        progress_dialog.show()
+        progress_dialog.raise_()
+        progress_dialog.activateWindow()
+        progress_dialog.start()
+
+    def _ai_tagging_inference_completed(
+        self,
+        progress_dialog: AITaggingProgressDialog,
+        entries: list,
+        results: object,
+        current,
+    ) -> None:
+        if self._ai_tagging_progress_dialog is progress_dialog:
+            self._ai_tagging_progress_dialog = None
+        self.window.commands._update_action_states()
+        normalized_results = results if isinstance(results, dict) else {}
+        review_dialog = AITaggingReviewDialog(
+            entries,
+            normalized_results,
+            self.window,
+            root_directory=self.window.directory,
+            image_prefetch_count=get_image_prefetch_count(self.window.settings),
+        )
+        review_dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        review_dialog.finished.connect(
+            lambda result, review=review_dialog, preferred=current.image_path
+            if current is not None
+            else None: self._ai_tagging_review_finished(
+                review, result, preferred
+            )
+        )
+        self._ai_tagging_review_dialog = review_dialog
+        self.window.commands._update_action_states()
+        review_dialog.show()
+        review_dialog.raise_()
+        review_dialog.activateWindow()
+
+    def _ai_tagging_inference_failed(
+        self, progress_dialog: AITaggingProgressDialog, message: str
+    ) -> None:
+        if self._ai_tagging_progress_dialog is progress_dialog:
+            self._ai_tagging_progress_dialog = None
+        self.window.commands._update_action_states()
+        QMessageBox.critical(self.window, "AI Inference Failed", message)
+
+    def _ai_tagging_review_finished(
+        self, dialog: AITaggingReviewDialog, result: int, preferred: Path | None
+    ) -> None:
+        if self._ai_tagging_review_dialog is dialog:
+            self._ai_tagging_review_dialog = None
+        self.window.commands._update_action_states()
+        if (
+            result == AITaggingReviewDialog.DialogCode.Accepted
+            and dialog.commit_result is not None
+            and self.window.directory is not None
+        ):
             self.window.folders._load_directory(
                 self.window.directory,
-                preferred_image=current.image_path if current else None,
+                preferred_image=preferred,
                 show_issues=False,
             )
 
