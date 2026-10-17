@@ -281,6 +281,7 @@ class WindowActions:
             tags_menu.addAction(action)
         tags_menu.addSeparator()
         tags_menu.addAction(self.normalize_action)
+        tags_menu.aboutToShow.connect(self._update_action_states)
 
         view_menu = self.window.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)

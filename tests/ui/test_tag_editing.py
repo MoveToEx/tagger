@@ -16,6 +16,7 @@ from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
 from tagger.ui.dialogs.traversal import TraversalDialog
 from tagger.ui.main_window.window import MainWindow
 import tagger.ui.main_window.window as main_window_module
+import tagger.ui.main_window.actions as actions_module
 
 from .helpers import create_png
 
@@ -51,6 +52,29 @@ def test_tags_menu_labels_and_order(qtbot) -> None:
         "<separator>",
         "Normalize...",
     ]
+
+
+def test_ai_tagging_action_refreshes_when_tags_menu_is_activated(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    create_png(tmp_path / "sample.png")
+    monkeypatch.setattr(actions_module, "ai_dependencies_available", lambda: False)
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+
+    assert not window.commands.ai_tagging_action.isEnabled()
+
+    monkeypatch.setattr(actions_module, "ai_dependencies_available", lambda: True)
+    tags_menu = next(
+        menu
+        for menu in window.menuBar().findChildren(QMenu)
+        if menu.title() == "&Tags"
+    )
+    tags_menu.aboutToShow.emit()
+
+    assert window.commands.ai_tagging_action.isEnabled()
 
 
 def test_main_window_loads_folder_and_edits_current_tags(qtbot, tmp_path: Path) -> None:

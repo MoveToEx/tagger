@@ -318,6 +318,15 @@ class MainWindow(QMainWindow):
                 return True
         return super().eventFilter(watched, event)
 
+    @override
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() in {
+            QEvent.Type.ActivationChange,
+            QEvent.Type.WindowActivate,
+        }:
+            self.commands._update_action_states()
+
     def _handle_image_catalog_key_press(self, event: QKeyEvent) -> bool:
         current_index = self.image_list.currentIndex()
         if (
