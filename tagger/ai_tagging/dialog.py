@@ -157,10 +157,10 @@ class AITaggingDialog(QDialog):
         self.inference_status = QLabel("Preparing inference...")
         self.inference_status.setWordWrap(True)
         layout = QVBoxLayout(page)
-        layout.addStretch(1)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
         layout.addWidget(self.inference_status)
         layout.addWidget(self.inference_progress)
-        layout.addStretch(1)
         return page
 
     def _create_review_page(self) -> QWidget:
@@ -656,7 +656,11 @@ class AITaggingProgressDialog(AITaggingDialog):
         self._parameters = parameters
         self._running = False
 
+        self.pages.removeWidget(self.selection_page)
+        self.pages.removeWidget(self.review_page)
         self.pages.setCurrentWidget(self.progress_page)
+        self.setMinimumWidth(440)
+        self.resize(440, self.sizeHint().height())
 
     def start(self) -> None:
         if self._running:
