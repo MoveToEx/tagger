@@ -367,11 +367,22 @@ def test_ai_tagger_transitions_through_selection_progress_and_review(
 
     monkeypatch.setattr(AITaggingSelectionDialog, "exec", accept_selection)
 
-    progress_dimensions: list[tuple[int, int, int]] = []
+    progress_dimensions: list[tuple[int, int, int, int, int, int]] = []
 
     def complete_inference(dialog: AITaggingProgressDialog) -> None:
+        outer_layout = dialog.layout()
+        progress_layout = dialog.progress_page.layout()
+        assert outer_layout is not None
+        assert progress_layout is not None
         progress_dimensions.append(
-            (dialog.width(), dialog.height(), dialog.pages.count())
+            (
+                dialog.width(),
+                dialog.height(),
+                dialog.pages.count(),
+                outer_layout.contentsMargins().left(),
+                progress_layout.contentsMargins().left(),
+                progress_layout.spacing(),
+            )
         )
         dialog._inference_completed(
             {str(image_path): [("cat", 0.9)]}
@@ -382,10 +393,20 @@ def test_ai_tagger_transitions_through_selection_progress_and_review(
     window.dialogs._open_ai_tagging()
 
     assert progress_dimensions
-    progress_width, progress_height, progress_page_count = progress_dimensions[0]
+    (
+        progress_width,
+        progress_height,
+        progress_page_count,
+        outer_margin,
+        page_margin,
+        page_spacing,
+    ) = progress_dimensions[0]
     assert progress_width == 440
     assert progress_height < 200
     assert progress_page_count == 1
+    assert outer_margin == 0
+    assert page_margin == 16
+    assert page_spacing == 12
     qtbot.waitUntil(
         lambda: window.dialogs._ai_tagging_review_dialog is not None
     )
