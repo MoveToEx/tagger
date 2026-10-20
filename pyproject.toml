@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "imagehash>=4.3.2",
     "numpy>=2.5.2",
+    "opencv-python-headless>=4.11,<5",
     "pillow>=12.3.0",
     "pyside6>=6.8,<7",
 ]

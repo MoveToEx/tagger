@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -38,6 +39,11 @@ from tagger.ui.dialogs.crop import CropDialog, CropSelectionDialog
 from tagger.ui.dialogs.deduplicate import DeduplicateDialog
 from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
 from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
+from tagger.ui.dialogs.frame_extraction import (
+    FrameExtractionDialog,
+    FrameExtractionProgressDialog,
+    FrameExtractionVideoDialog,
+)
 from tagger.ui.dialogs.mask_editor import MaskEditorDialog, MaskSelectionDialog
 from tagger.ui.dialogs.review import ReviewDialog
 from tagger.ui.dialogs.grid_preview import GridPreviewDialog
@@ -66,6 +72,87 @@ class DialogController:
         self._probe_dialog: ProbeDialog | None = None
         self._ai_tagging_progress_dialog: AITaggingProgressDialog | None = None
         self._ai_tagging_review_dialog: AITaggingReviewDialog | None = None
+        self._frame_extraction_video_dialog: FrameExtractionVideoDialog | None = None
+        self._frame_extraction_dialog: FrameExtractionDialog | None = None
+        self._frame_extraction_progress_dialog: FrameExtractionProgressDialog | None = None
+
+    def _open_frame_extraction(self) -> None:
+        directory = self.window.directory
+        if directory is None or any((
+            self._frame_extraction_video_dialog,
+            self._frame_extraction_dialog,
+            self._frame_extraction_progress_dialog,
+        )):
+            return
+        dialog = FrameExtractionVideoDialog(directory, self.window)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(partial(self._frame_extraction_video_finished, dialog, directory))
+        self._frame_extraction_video_dialog = dialog
+        self.window.commands._update_action_states()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _frame_extraction_video_finished(
+        self, dialog: FrameExtractionVideoDialog, directory: Path, result: int,
+    ) -> None:
+        if self._frame_extraction_video_dialog is dialog:
+            self._frame_extraction_video_dialog = None
+        if result != FrameExtractionVideoDialog.DialogCode.Accepted or dialog.video_path is None:
+            self.window.commands._update_action_states()
+            return
+        review = FrameExtractionDialog(dialog.video_path, directory, self.window)
+        review.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        review.finished.connect(partial(self._frame_extraction_review_finished, review, directory))
+        self._frame_extraction_dialog = review
+        self.window.commands._update_action_states()
+        review.show()
+        review.raise_()
+        review.activateWindow()
+
+    def _frame_extraction_review_finished(
+        self, dialog: FrameExtractionDialog, directory: Path, result: int,
+    ) -> None:
+        if self._frame_extraction_dialog is dialog:
+            self._frame_extraction_dialog = None
+        if result != FrameExtractionDialog.DialogCode.Accepted or not dialog.selected_frames:
+            self.window.commands._update_action_states()
+            return
+        progress = FrameExtractionProgressDialog(
+            dialog.video_path, dialog.selected_frames, directory, self.window,
+        )
+        progress.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        progress.finished.connect(partial(self._frame_extraction_finished, progress, directory))
+        self._frame_extraction_progress_dialog = progress
+        self.window.commands._update_action_states()
+        progress.show()
+        progress.start()
+
+    def _frame_extraction_finished(
+        self, progress: FrameExtractionProgressDialog, directory: Path, _result: int,
+    ) -> None:
+        if self._frame_extraction_progress_dialog is progress:
+            self._frame_extraction_progress_dialog = None
+        self.window.commands._update_action_states()
+        result = progress.result_data
+        if result.paths and self.window.directory == directory:
+            current = self.window._current_entry()
+            self.window.folders._load_directory(
+                directory,
+                preferred_image=current.image_path if current else result.paths[0],
+                show_issues=False,
+            )
+        message = (
+            f"Frame extraction cancelled. Kept {len(result.paths)} extracted frame(s)."
+            if result.cancelled
+            else f"Extracted {len(result.paths)} frame(s) into the root folder."
+        )
+        self.window.statusBar().showMessage(message, 6000)
+        if result.failures:
+            QMessageBox.warning(
+                self.window, "Frame Extraction Failed",
+                f"Saved {len(result.paths)} frame(s).\n\n" + "\n".join(result.failures[:12]),
+            )
 
     def _open_global_search(self, *, initial_pattern: str = "") -> None:
         if not self.window.catalog.entries:

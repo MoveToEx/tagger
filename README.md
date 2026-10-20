@@ -110,6 +110,22 @@ _Image_ > _Grid Preview_ visualizes what an image looks like and how large a DiT
 
 Try to make your training target take more cells so the model understands it better.  
 
+### Tools
+
+#### Frame extraction
+
+_Tools_ > _Frame Extraction_ opens a video file and lets you select frames from its
+preview. Play or pause, scrub the timeline, step by one frame, or jump by two
+seconds. Selected frames appear as thumbnails; click one to revisit it, or remove
+it from the selection. Click _Finish_ to extract full-resolution PNGs into the root
+of the currently opened folder. Progress is shown during extraction, and the
+image catalog refreshes afterward.
+
+Files are named `{video_stem}_frame_{frame_number}.png` with six-digit frame
+numbers starting at 1. Existing files are preserved by adding a numeric suffix.
+Cancelling extraction keeps frames already saved. Video decoding and extraction
+use OpenCV; no separate FFmpeg installation is required.
+
 ### Tag editing
 
 #### Traversal

@@ -135,6 +135,11 @@ class WindowActions:
         self.crop_action = QAction("Crop...", self.window)
         self.crop_action.triggered.connect(self.window.dialogs._open_crop)
 
+        self.frame_extraction_action = QAction("Frame Extraction...", self.window)
+        self.frame_extraction_action.triggered.connect(
+            self.window.dialogs._open_frame_extraction
+        )
+
         self.settings_action = QAction("Settings...", self.window)
         self.settings_action.triggered.connect(self.window.dialogs._open_settings)
 
@@ -283,6 +288,9 @@ class WindowActions:
         tags_menu.addAction(self.normalize_action)
         tags_menu.aboutToShow.connect(self._update_action_states)
 
+        tools_menu = self.window.menuBar().addMenu("&Tools")
+        tools_menu.addAction(self.frame_extraction_action)
+
         view_menu = self.window.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)
         view_menu.addAction(self.actual_size_action)
@@ -335,6 +343,12 @@ class WindowActions:
         ]:
             action.setEnabled(has_current and has_directory)
         self.rescan_action.setEnabled(has_directory)
+        self.frame_extraction_action.setEnabled(
+            has_directory
+            and self.window.dialogs._frame_extraction_video_dialog is None
+            and self.window.dialogs._frame_extraction_dialog is None
+            and self.window.dialogs._frame_extraction_progress_dialog is None
+        )
         self.tidy_action.setEnabled(has_directory)
         self.archive_action.setEnabled(
             count > 0
