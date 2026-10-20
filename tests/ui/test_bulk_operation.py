@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import Qt
 
 from tagger.ui.dialogs.bulk_operation import BulkOperationDialog
@@ -88,6 +89,9 @@ def test_bulk_operation_runs_code_and_skips_unchanged_images(
     assert dialog.next_button.text() == "Next"
     assert not dialog.previous_button.isEnabled()
     assert not dialog.next_button.isEnabled()
+    assert dialog.finish_button.text() == "Finish"
+    assert dialog.finish_button.isVisibleTo(dialog)
+    assert dialog.finish_button.isEnabled()
 
 
 def test_bulk_operation_reports_invalid_process_return(qtbot, tmp_path: Path) -> None:
@@ -153,6 +157,107 @@ def test_bulk_operation_updates_decisions_while_navigation_only_moves(
     assert not dialog.apply_change_checkbox.isChecked()
     assert not dialog.previous_button.isEnabled()
     assert dialog.next_button.isEnabled()
+
+
+@pytest.mark.parametrize("finish_index", [0, 1, 2])
+def test_bulk_operation_finish_accepts_unreviewed_changes(
+    qtbot, tmp_path: Path, finish_index: int
+) -> None:
+    for name in ["first", "second", "third"]:
+        create_png(tmp_path / f"{name}.png")
+        (tmp_path / f"{name}.txt").write_text("cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    dialog = BulkOperationDialog(
+        window.catalog.entries,
+        root_directory=tmp_path,
+    )
+    qtbot.addWidget(dialog)
+    dialog._show_code_page()
+    dialog.code_input.setPlainText(
+        "def process(fn: str, tags: set[str]) -> set[str]:\n"
+        "    return tags | {'processed'}\n"
+    )
+    dialog._run_code()
+    for _ in range(finish_index):
+        assert dialog.finish_button.isEnabled()
+        dialog.next_button.click()
+
+    assert dialog.finish_button.isVisibleTo(dialog)
+    assert dialog.finish_button.isEnabled()
+    dialog.finish_button.click()
+
+    assert dialog.result() == BulkOperationDialog.DialogCode.Accepted
+    assert dialog.commit_result is not None
+    assert len(dialog.commit_result.succeeded) == 3
+    for name in ["first", "second", "third"]:
+        assert (tmp_path / f"{name}.txt").read_text(encoding="utf-8") == (
+            "cat, processed\n"
+        )
+
+
+def test_bulk_operation_finish_preserves_edits_and_skips_rejected_changes(
+    qtbot, tmp_path: Path
+) -> None:
+    for name in ["first", "second", "third"]:
+        create_png(tmp_path / f"{name}.png")
+        (tmp_path / f"{name}.txt").write_text("cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    dialog = BulkOperationDialog(
+        window.catalog.entries,
+        root_directory=tmp_path,
+    )
+    qtbot.addWidget(dialog)
+    dialog._show_code_page()
+    dialog.code_input.setPlainText(
+        "def process(fn: str, tags: set[str]) -> set[str]:\n"
+        "    return tags | {'processed'}\n"
+    )
+    dialog._run_code()
+    dialog.new_tags_input.setPlainText("cat, edited")
+    dialog.next_button.click()
+    dialog.apply_change_checkbox.setChecked(False)
+
+    dialog.finish_button.click()
+
+    assert dialog.result() == BulkOperationDialog.DialogCode.Accepted
+    assert (tmp_path / "first.txt").read_text(encoding="utf-8") == "cat, edited\n"
+    assert (tmp_path / "second.txt").read_text(encoding="utf-8") == "cat\n"
+    assert (tmp_path / "third.txt").read_text(encoding="utf-8") == "cat, processed\n"
+
+
+def test_bulk_operation_finish_remains_available_when_all_changes_are_rejected(
+    qtbot, tmp_path: Path
+) -> None:
+    create_png(tmp_path / "sample.png")
+    tag_path = tmp_path / "sample.txt"
+    tag_path.write_text("cat\n", encoding="utf-8")
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.folders._load_directory(tmp_path, show_issues=False)
+    dialog = BulkOperationDialog(
+        window.catalog.entries,
+        root_directory=tmp_path,
+    )
+    qtbot.addWidget(dialog)
+    dialog._show_code_page()
+    dialog.code_input.setPlainText(
+        "def process(fn: str, tags: set[str]) -> set[str]:\n"
+        "    return tags | {'processed'}\n"
+    )
+    dialog._run_code()
+    dialog.apply_change_checkbox.setChecked(False)
+
+    assert dialog.finish_button.isEnabled()
+    dialog.finish_button.click()
+
+    assert dialog.result() == BulkOperationDialog.DialogCode.Accepted
+    assert dialog.commit_result is not None
+    assert not dialog.commit_result.succeeded
+    assert tag_path.read_text(encoding="utf-8") == "cat\n"
 
 
 def test_bulk_operation_apply_all_ignores_apply_decisions(

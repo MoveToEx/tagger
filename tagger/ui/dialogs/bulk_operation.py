@@ -236,6 +236,8 @@ class BulkOperationDialog(QDialog):
         self.previous_button.clicked.connect(self._previous)
         self.next_button = QPushButton("Next")
         self.next_button.clicked.connect(self._next)
+        self.finish_button = QPushButton("Finish")
+        self.finish_button.clicked.connect(self._finish)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.discard_button)
@@ -243,6 +245,7 @@ class BulkOperationDialog(QDialog):
         buttons.addStretch(1)
         buttons.addWidget(self.previous_button)
         buttons.addWidget(self.next_button)
+        buttons.addWidget(self.finish_button)
 
         layout = QVBoxLayout(page)
         layout.addWidget(self.progress_label)
@@ -464,7 +467,7 @@ class BulkOperationDialog(QDialog):
         if self.next_button.isEnabled():
             self.next_button.setFocus()
         else:
-            self.apply_all_button.setFocus()
+            self.finish_button.setFocus()
 
     def _current_new_tags(self) -> list[str]:
         return normalize_tags(parse_tags(self.new_tags_input.toPlainText()))
@@ -531,6 +534,11 @@ class BulkOperationDialog(QDialog):
         if self.pages.currentWidget() is not self.approval_page:
             return
         self._commit(ignore_decisions=True)
+
+    def _finish(self) -> None:
+        if self.pages.currentWidget() is not self.approval_page:
+            return
+        self._commit()
 
     def _commit(self, *, ignore_decisions: bool = False) -> None:
         requests = [
