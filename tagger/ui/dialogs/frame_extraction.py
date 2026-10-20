@@ -6,7 +6,10 @@ import time
 from typing import override
 
 from PySide6.QtCore import QThread, QTimer, Qt, QSize, Signal
-from PySide6.QtGui import QCloseEvent, QFontMetrics, QIcon, QImage, QPixmap, QResizeEvent
+from PySide6.QtGui import (
+    QCloseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFontMetrics,
+    QIcon, QImage, QPixmap, QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QDialog, QFileDialog, QHBoxLayout, QLabel, QLayout, QLineEdit, QListWidget,
     QListWidgetItem, QProgressBar, QPushButton, QSizePolicy, QSlider,
@@ -123,11 +126,14 @@ class FrameExtractionVideoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Frame Extraction — Select Video")
         self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setAcceptDrops(True)
+        self._directory = directory
         self.video_path: Path | None = None
         self._preview_thread: _PreviewThread | None = None
         self.file_input = QLineEdit()
-        self.file_input.setPlaceholderText("Choose a video file")
+        self.file_input.setPlaceholderText("Choose or drop a video file")
         self.file_input.setClearButtonEnabled(True)
+        self.file_input.setAcceptDrops(False)
         stabilize_widget_size(self.file_input, minimum_width=420)
         self.file_input.returnPressed.connect(self._open_video)
         self.browse_button = QPushButton("Browse...")
@@ -135,7 +141,7 @@ class FrameExtractionVideoDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(self.file_input)
         row.addWidget(self.browse_button)
-        prompt = QLabel("Select the video to extract frames from:")
+        prompt = QLabel("Select a video, or drag and drop one here:")
         prompt.setBuddy(self.file_input)
         destination_label = QLabel(f"Save PNG frames to: {directory}")
         destination_label.setWordWrap(True)
@@ -165,11 +171,48 @@ class FrameExtractionVideoDialog(QDialog):
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Video", "",
+            self, "Select Video", str(self._directory),
             "Video files (*.mp4 *.mkv *.avi *.mov *.webm *.m4v *.mpg *.mpeg *.wmv *.mts *.m2ts);;All files (*)",
         )
         if path:
             self.file_input.setText(path)
+
+    def _dropped_video(
+        self, event: QDragEnterEvent | QDragMoveEvent | QDropEvent,
+    ) -> Path | None:
+        urls = event.mimeData().urls()
+        if not self.next_button.isEnabled() or len(urls) != 1 or not urls[0].isLocalFile():
+            return None
+        path = Path(urls[0].toLocalFile())
+        return path if path.is_file() else None
+
+    @override
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._dropped_video(event) is None:
+            event.ignore()
+        else:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+
+    @override
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if self._dropped_video(event) is None:
+            event.ignore()
+        else:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+
+    @override
+    def dropEvent(self, event: QDropEvent) -> None:
+        path = self._dropped_video(event)
+        if path is None:
+            event.ignore()
+            return
+        self.file_input.setText(str(path))
+        self.error_label.clear()
+        self.error_label.hide()
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
 
     def _open_video(self) -> None:
         if not self.next_button.isEnabled():

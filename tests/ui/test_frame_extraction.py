@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Event
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QMenu
+from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu
+import pytest
 import shiboken6
 
 from tagger.frame_extraction import ExtractionResult
@@ -52,7 +54,11 @@ def test_file_stage_is_compact_and_closes_after_video_validation(
     assert dialog.height() < 220
     assert dialog.size() == dialog.sizeHint()
     assert_stable_widget_size(dialog.file_input, minimum_width=420)
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(video_file), ""))
+    def browse(parent, title, directory, file_filter):
+        assert directory == str(tmp_path)
+        return str(video_file), ""
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", browse)
     dialog.browse_button.click()
     assert dialog.file_input.text() == str(video_file)
     dialog.next_button.click()
@@ -61,6 +67,80 @@ def test_file_stage_is_compact_and_closes_after_video_validation(
     assert dialog.video_path == video_file
     assert dialog._preview_thread is None
     assert not list(tmp_path.glob("*.png"))
+
+
+def test_video_picker_accepts_file_drops_on_dialog_and_input(
+    qtbot, tmp_path: Path, video_file: Path,
+) -> None:
+    video_file = video_file.rename(tmp_path / "视频 with spaces.avi")
+    dialog = FrameExtractionVideoDialog(tmp_path)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(video_file))])
+    actions = Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+    for target in (dialog, dialog.file_input):
+        dialog.file_input.setText("previous choice")
+        enter = QDragEnterEvent(
+            QPoint(5, 5), actions, mime_data,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(target, enter)
+        assert enter.isAccepted()
+        move = QDragMoveEvent(
+            QPoint(5, 5), actions, mime_data,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(target, move)
+        assert move.isAccepted()
+        drop = QDropEvent(
+            QPointF(5, 5), actions, mime_data,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(target, drop)
+        assert drop.isAccepted()
+        assert drop.dropAction() == Qt.DropAction.CopyAction
+        assert dialog.file_input.text() == str(video_file)
+        assert dialog.isVisible()
+        assert video_file.is_file()
+    dialog.next_button.click()
+    qtbot.waitUntil(lambda: not dialog.isVisible())
+    assert dialog.video_path == video_file
+
+
+@pytest.mark.parametrize("source", ["folder", "remote", "multiple", "missing", "text", "busy"])
+def test_video_picker_rejects_invalid_or_busy_drops(
+    qtbot, tmp_path: Path, video_file: Path, source: str,
+) -> None:
+    dialog = FrameExtractionVideoDialog(tmp_path)
+    qtbot.addWidget(dialog)
+    dialog.file_input.setText("previous choice")
+    mime_data = QMimeData()
+    urls = {
+        "folder": [QUrl.fromLocalFile(str(tmp_path))],
+        "remote": [QUrl("https://example.com/video.mp4")],
+        "multiple": [QUrl.fromLocalFile(str(video_file))] * 2,
+        "missing": [QUrl.fromLocalFile(str(tmp_path / "missing.mp4"))],
+        "busy": [QUrl.fromLocalFile(str(video_file))],
+        "text": [],
+    }
+    mime_data.setUrls(urls[source])
+    mime_data.setText("https://example.com/video.mp4")
+    if source == "busy":
+        dialog.next_button.setEnabled(False)
+    enter = QDragEnterEvent(
+        QPoint(5, 5), Qt.DropAction.CopyAction, mime_data,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    dialog.dragEnterEvent(enter)
+    assert not enter.isAccepted()
+    drop = QDropEvent(
+        QPointF(5, 5), Qt.DropAction.CopyAction, mime_data,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    dialog.dropEvent(drop)
+    assert not drop.isAccepted()
+    assert dialog.file_input.text() == "previous choice"
 
 
 def test_invalid_video_can_be_corrected(qtbot, tmp_path: Path, video_file: Path) -> None:
