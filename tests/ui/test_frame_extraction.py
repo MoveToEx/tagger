@@ -4,7 +4,7 @@ from pathlib import Path
 from threading import Event
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu
 import pytest
 import shiboken6
@@ -188,26 +188,72 @@ def test_selection_thumbnails_are_unique_ordered_and_removable(qtbot, tmp_path: 
     dialog = _open_video(qtbot, tmp_path, video_file)
     dialog.position_slider.setValue(9)
     _wait_for_frame(qtbot, dialog, 9)
-    dialog.select_button.click()
+    dialog.select_checkbox.click()
     dialog.position_slider.setValue(2)
     _wait_for_frame(qtbot, dialog, 2)
-    dialog.select_button.click()
+    dialog.select_checkbox.click()
     assert dialog.selected_frames == [2, 9]
     assert dialog.finish_button.isEnabled()
-    assert dialog.select_button.text() == "Deselect Frame"
+    assert dialog.select_checkbox.isChecked()
+    assert_stable_widget_size(dialog.select_checkbox)
     assert dialog.frame_list.count() == 2
     assert not dialog.frame_list.item(0).icon().isNull()
     assert dialog.frame_list.item(0).text().startswith("Frame 3\n")
-    dialog.select_button.click()
+    dialog.select_checkbox.click()
+    assert not dialog.select_checkbox.isChecked()
     assert dialog.selected_frames == [9]
     item = dialog.frame_list.item(0)
     dialog.frame_list.setCurrentItem(item)
     dialog.frame_list.itemClicked.emit(item)
     _wait_for_frame(qtbot, dialog, 9)
-    assert dialog.select_button.text() == "Deselect Frame"
+    assert dialog.select_checkbox.isChecked()
     dialog.remove_button.click()
     assert dialog.selected_frames == []
+    assert not dialog.select_checkbox.isChecked()
     assert not dialog.finish_button.isEnabled()
+    dialog.reject()
+
+
+def _scroll_video(dialog: FrameExtractionDialog, angle: int, pixels: int = 0) -> QWheelEvent:
+    position = dialog.preview.rect().center()
+    event = QWheelEvent(
+        QPointF(position), QPointF(dialog.preview.mapToGlobal(position)),
+        QPoint(0, pixels), QPoint(0, angle),
+        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate, False,
+    )
+    QApplication.sendEvent(dialog.preview, event)
+    return event
+
+
+def test_mouse_wheel_seeks_frames_and_preserves_selection(qtbot, tmp_path: Path, video_file: Path) -> None:
+    dialog = _open_video(qtbot, tmp_path, video_file)
+    dialog.select_checkbox.click()
+    for delta, frame in [(-120, 1), (120, 0), (120, 0), (-240, 2), (-1440, 14), (-120, 14)]:
+        assert _scroll_video(dialog, delta).isAccepted()
+        _wait_for_frame(qtbot, dialog, frame)
+        assert dialog.selected_frames == [0]
+        assert dialog.select_checkbox.isChecked() == (frame == 0)
+    dialog.reject()
+
+
+def test_smooth_wheel_scrolling_accumulates_and_pauses_playback(qtbot, tmp_path: Path, video_file: Path) -> None:
+    dialog = _open_video(qtbot, tmp_path, video_file)
+    for _ in range(3):
+        _scroll_video(dialog, -30)
+        assert dialog.current_frame == 0
+        assert dialog._ready
+    _scroll_video(dialog, -30)
+    _wait_for_frame(qtbot, dialog, 1)
+    _scroll_video(dialog, 0, pixels=5)
+    _wait_for_frame(qtbot, dialog, 0)
+    dialog.play_button.click()
+    qtbot.waitUntil(lambda: dialog.current_frame >= 2)
+    target = dialog._target_frame - 1
+    _scroll_video(dialog, 120)
+    _wait_for_frame(qtbot, dialog, target)
+    assert not dialog._playing
+    assert not dialog._timer.isActive()
     dialog.reject()
 
 
@@ -218,8 +264,42 @@ def test_rapid_scrubbing_selects_the_frame_actually_shown(qtbot, tmp_path: Path,
     _wait_for_frame(qtbot, dialog, 6)
     color = dialog._current_image.pixelColor(0, 0)
     assert (color.red(), color.green(), color.blue()) == (30, 195, 60)
-    dialog.select_button.click()
+    dialog.select_checkbox.click()
     assert dialog.selected_frames == [6]
+    dialog.reject()
+
+
+@pytest.mark.parametrize("focus", [
+    "select_checkbox", "position_slider", "frame_list", "play_button", "cancel_button",
+])
+def test_frame_shortcuts_work_with_focused_child_controls(
+    qtbot, tmp_path: Path, video_file: Path, focus: str,
+) -> None:
+    dialog = _open_video(qtbot, tmp_path, video_file)
+    dialog.activateWindow()
+    target = getattr(dialog, focus)
+    target.setFocus()
+    qtbot.waitUntil(target.hasFocus)
+    qtbot.keyClick(target, Qt.Key.Key_Space)
+    assert dialog.selected_frames == [0]
+    assert dialog.select_checkbox.isChecked()
+    qtbot.keyClick(target, Qt.Key.Key_Space)
+    assert dialog.selected_frames == []
+    assert not dialog.select_checkbox.isChecked()
+    assert not dialog._playing
+    assert dialog.isVisible()
+
+    for key, modifiers, frame in [
+        (Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier, 0),
+        (Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier, 1),
+        (Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier, 11),
+        (Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier, 1),
+        (Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier, 0),
+    ]:
+        target.setFocus()
+        qtbot.keyClick(target, key, modifier=modifiers)
+        _wait_for_frame(qtbot, dialog, frame)
+        assert dialog.selected_frames == []
     dialog.reject()
 
 
@@ -253,7 +333,7 @@ def test_playback_pauses_and_restarts_at_end(qtbot, tmp_path: Path, video_file: 
     assert dialog.play_button.text() == "Play"
     dialog.play_button.click()
     _wait_for_frame(qtbot, dialog, 0)
-    dialog.select_button.click()
+    dialog.select_checkbox.click()
     assert not dialog._playing
     assert dialog.selected_frames == [0]
     dialog.finish_button.click()
@@ -343,7 +423,7 @@ def test_menu_workflow_extracts_to_root_and_refreshes_catalog(
     assert window.dialogs._frame_extraction_video_dialog is None
     assert review.isVisible()
     review.finished.connect(lambda result: closed.append(not review.isVisible()))
-    review.select_button.click()
+    review.select_checkbox.click()
     review.finish_button.click()
     try:
         progress = window.dialogs._frame_extraction_progress_dialog

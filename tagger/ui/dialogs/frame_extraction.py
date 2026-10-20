@@ -8,10 +8,10 @@ from typing import override
 from PySide6.QtCore import QThread, QTimer, Qt, QSize, Signal
 from PySide6.QtGui import (
     QCloseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFontMetrics,
-    QIcon, QImage, QPixmap, QResizeEvent,
+    QIcon, QImage, QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent,
 )
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QLabel, QLayout, QLineEdit, QListWidget,
+    QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLayout, QLineEdit, QListWidget,
     QListWidgetItem, QProgressBar, QPushButton, QSizePolicy, QSlider,
     QSplitter, QVBoxLayout, QWidget,
 )
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from tagger.frame_extraction import (
     ExtractionResult, VideoInfo, VideoReader, extract_frames,
 )
-from tagger.ui.widgets import stabilize_widget_size
+from tagger.ui.widgets import stabilize_checkbox, stabilize_widget_size
 
 
 def _timestamp(seconds: float) -> str:
@@ -94,13 +94,17 @@ class _PreviewThread(QThread):
 
 
 class _VideoPreview(QLabel):
+    frame_step_requested = Signal(int)
+
     def __init__(self) -> None:
         super().__init__("Loading video...")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(320, 200)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setStyleSheet("background: #101828; color: white;")
+        self.setToolTip("Scroll up/down to seek one frame backward/forward.")
         self._source = QPixmap()
+        self._wheel_delta = 0
 
     def set_image(self, image: QImage) -> None:
         self._source = QPixmap.fromImage(image)
@@ -117,6 +121,25 @@ class _VideoPreview(QLabel):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._update_pixmap()
+
+    @override
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._source.isNull():
+            event.ignore()
+            return
+        delta = event.angleDelta().y()
+        if delta:
+            self._wheel_delta += delta
+            steps = (abs(self._wheel_delta) // 120) * (1 if self._wheel_delta > 0 else -1)
+            self._wheel_delta -= steps * 120
+            if steps:
+                self.frame_step_requested.emit(-steps)
+        elif event.pixelDelta().y():
+            self.frame_step_requested.emit(-1 if event.pixelDelta().y() > 0 else 1)
+        else:
+            event.ignore()
+            return
+        event.accept()
 
 
 class FrameExtractionVideoDialog(QDialog):
@@ -313,6 +336,7 @@ class FrameExtractionDialog(QDialog):
         layout.addWidget(self.destination_label)
         layout.addWidget(self.error_label)
         layout.addLayout(buttons)
+        self._create_shortcuts()
         self._update_controls()
         self._open_video()
 
@@ -326,6 +350,7 @@ class FrameExtractionDialog(QDialog):
         self.video_label.setTextFormat(Qt.TextFormat.PlainText)
         self.video_label.setWordWrap(True)
         self.preview = _VideoPreview()
+        self.preview.frame_step_requested.connect(self._step)
         self.position_label = QLabel()
         self.position_slider = QSlider(Qt.Orientation.Horizontal)
         self.position_slider.setAccessibleName("Video position")
@@ -335,17 +360,19 @@ class FrameExtractionDialog(QDialog):
         self.play_button = QPushButton("Play")
         self.forward_frame_button = QPushButton("+1 frame")
         self.forward_seconds_button = QPushButton("+2 s")
-        self.select_button = QPushButton("Select Frame")
-        self.back_seconds_button.setToolTip("Seek backward by 2 seconds")
-        self.back_frame_button.setToolTip("Previous frame")
-        self.forward_frame_button.setToolTip("Next frame")
-        self.forward_seconds_button.setToolTip("Seek forward by 2 seconds")
+        self.select_checkbox = QCheckBox("Select Frame")
+        self.select_checkbox.setToolTip("Select/deselect the current frame (Space)")
+        stabilize_checkbox(self.select_checkbox)
+        self.back_seconds_button.setToolTip("Seek backward by 2 seconds (Ctrl+Left)")
+        self.back_frame_button.setToolTip("Previous frame (Left)")
+        self.forward_frame_button.setToolTip("Next frame (Right)")
+        self.forward_seconds_button.setToolTip("Seek forward by 2 seconds (Ctrl+Right)")
         self.play_button.clicked.connect(self._toggle_playback)
         self.back_frame_button.clicked.connect(lambda: self._step(-1))
         self.forward_frame_button.clicked.connect(lambda: self._step(1))
         self.back_seconds_button.clicked.connect(lambda: self._step_seconds(-2))
         self.forward_seconds_button.clicked.connect(lambda: self._step_seconds(2))
-        self.select_button.clicked.connect(self._toggle_frame)
+        self.select_checkbox.clicked.connect(self._toggle_frame)
         controls = QHBoxLayout()
         for button in (
             self.back_seconds_button, self.back_frame_button, self.play_button,
@@ -353,6 +380,7 @@ class FrameExtractionDialog(QDialog):
         ):
             controls.addWidget(button)
         controls.addStretch(1)
+        controls.addWidget(self.select_checkbox, alignment=Qt.AlignmentFlag.AlignRight)
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -361,7 +389,6 @@ class FrameExtractionDialog(QDialog):
         left_layout.addWidget(self.position_slider)
         left_layout.addWidget(self.position_label)
         left_layout.addLayout(controls)
-        left_layout.addWidget(self.select_button)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -391,6 +418,22 @@ class FrameExtractionDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.splitter)
         return page
+
+    def _create_shortcuts(self) -> None:
+        self._shortcuts: list[QShortcut] = []
+        callbacks = {
+            "Space": self.select_checkbox.click,
+            "Left": lambda: self._step(-1),
+            "Right": lambda: self._step(1),
+            "Ctrl+Left": lambda: self._step_seconds(-2),
+            "Ctrl+Right": lambda: self._step_seconds(2),
+        }
+        for key, callback in callbacks.items():
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.setAutoRepeat(key != "Space")
+            shortcut.activated.connect(callback)
+            self._shortcuts.append(shortcut)
 
     def _open_video(self) -> None:
         self._stop_preview()
@@ -522,12 +565,10 @@ class FrameExtractionDialog(QDialog):
             self._update_controls()
 
     def _update_controls(self) -> None:
-        self.select_button.setEnabled(self._ready)
+        self.select_checkbox.setEnabled(self._ready)
         self.play_button.setEnabled(not self._current_image.isNull())
         self.position_slider.setEnabled(self.info is not None)
-        self.select_button.setText(
-            "Deselect Frame" if self.current_frame in self._selected else "Select Frame"
-        )
+        self.select_checkbox.setChecked(self.current_frame in self._selected)
         self.selection_label.setText(f"Selected frames ({len(self._selected)})")
         self.finish_button.setEnabled(bool(self._selected))
         if self.info is not None:

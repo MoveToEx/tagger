@@ -121,6 +121,11 @@ it from the selection. Click _Finish_ to extract full-resolution PNGs into the r
 of the currently opened folder. Progress is shown during extraction, and the
 image catalog refreshes afterward.
 
+In frame review, press **Space** to select/deselect the current frame, **Left/Right**
+to step one frame, or **Ctrl+Left/Right** to jump two seconds. Scrolling up/down
+over the video steps backward/forward by one frame per wheel notch. The checkbox
+beside the playback controls shows whether the current frame is selected.
+
 Files are named `{video_stem}_frame_{frame_number}.png` with six-digit frame
 numbers starting at 1. Existing files are preserved by adding a numeric suffix.
 Cancelling extraction keeps frames already saved. Video decoding and extraction
