@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import override
 
 from PIL import Image
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent, QIntValidator
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QCloseEvent, QIcon, QIntValidator
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDialog, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton, QSpinBox,
@@ -19,6 +19,7 @@ from tagger.crop_storage import (
     CropBox, FileStamp, crop_disabled_reason, crop_image, file_stamp, load_crop_image,
 )
 from tagger.domain.models import ImageEntry
+from tagger.paths import PROJECT_ROOT
 from tagger.preprocess import PreprocessOptions, closest_bucket
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
 from tagger.ui.mouse_navigation import MouseNavigation
@@ -183,14 +184,32 @@ class CropDialog(QDialog):
         threshold_row = QHBoxLayout()
         threshold_row.addWidget(threshold_label)
         threshold_row.addWidget(self.detection_threshold_input)
-        threshold_row.addStretch(1)
-
         self.detect_button = QPushButton("Detect")
         self.detect_button.setAutoDefault(False)
         self.detect_button.setToolTip(
-            "Trim single-color borders inside the current crop, keeping the active ratio."
+            "Trim single-color borders from the full image, keeping the active ratio."
         )
         self.detect_button.clicked.connect(self._detect)
+        threshold_row.addWidget(self.detect_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.detect_inside_crop_button = QToolButton()
+        self.detect_inside_crop_button.setIcon(
+            QIcon(str(PROJECT_ROOT / "assets" / "icons" / "detect-inside-crop.svg"))
+        )
+        self.detect_inside_crop_button.setIconSize(QSize(16, 16))
+        detect_button_height = self.detect_button.sizeHint().height()
+        self.detect_inside_crop_button.setFixedSize(
+            detect_button_height, detect_button_height
+        )
+        self.detect_inside_crop_button.setToolTip(
+            "Trim single-color borders inside the current crop, keeping the active ratio."
+        )
+        self.detect_inside_crop_button.setAccessibleName("Detect Inside Crop")
+        self.detect_inside_crop_button.clicked.connect(self._detect_inside_crop)
+        threshold_row.addWidget(
+            self.detect_inside_crop_button, 0, Qt.AlignmentFlag.AlignLeft
+        )
+        threshold_row.addStretch(1)
+
         self.auto_detect_checkbox = QCheckBox("Auto detect")
         self.auto_detect_checkbox.setToolTip(
             "Detect borders when opening an image without a staged crop."
@@ -198,7 +217,6 @@ class CropDialog(QDialog):
         stabilize_checkbox(self.auto_detect_checkbox)
         self.auto_detect_checkbox.toggled.connect(self._auto_detect)
         detection_row = QHBoxLayout()
-        detection_row.addWidget(self.detect_button, 0, Qt.AlignmentFlag.AlignLeft)
         detection_row.addWidget(self.auto_detect_checkbox)
         detection_row.addStretch(1)
 
@@ -529,10 +547,28 @@ class CropDialog(QDialog):
     def _detect(self) -> None:
         if not self._current_loaded or self._saving or self._current_image is None:
             return
+        self._detect_box(
+            (0, 0, self._current_image.width, self._current_image.height)
+        )
+
+    def _detect_inside_crop(self) -> None:
+        if not self._current_loaded or self._saving:
+            return
+        draft = self._drafts[self.paths[self.current_index]]
+        self._detect_box(draft.box)
+
+    def _detect_box(self, box: CropBox | None) -> None:
+        if (
+            not self._current_loaded
+            or self._saving
+            or self._current_image is None
+            or box is None
+        ):
+            return
         draft = self._drafts[self.paths[self.current_index]]
         try:
             box = detect_crop_box(
-                self._current_image, draft.box,
+                self._current_image, box,
                 aspect_ratio=draft.ratio(self._arb_options),
                 tolerance=self.detection_threshold_input.value(),
             )

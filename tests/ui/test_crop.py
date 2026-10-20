@@ -322,9 +322,27 @@ def test_detect_stages_border_trim_and_finish_saves_it(qtbot, tmp_path) -> None:
 def test_detect_only_trims_inside_current_crop(qtbot, tmp_path) -> None:
     dialog = CropDialog([_bordered_image(tmp_path / "border.png")])
     qtbot.addWidget(dialog)
+    assert not dialog.detect_inside_crop_button.icon().isNull()
+    assert dialog.detect_inside_crop_button.accessibleName() == "Detect Inside Crop"
+    assert dialog.detect_inside_crop_button.height() == dialog.detect_button.sizeHint().height()
+    assert dialog.detect_inside_crop_button.width() == dialog.detect_inside_crop_button.height()
+    dialog.image_view.set_crop_box((200, 0, 700, 400))
+
+    dialog.detect_inside_crop_button.click()
+    assert dialog.image_view.crop_box == (200, 80, 700, 320)
+
+
+def test_detect_uses_full_image_while_inside_crop_button_stays_bounded(
+    qtbot, tmp_path
+) -> None:
+    dialog = CropDialog([_bordered_image(tmp_path / "border.png")])
+    qtbot.addWidget(dialog)
     dialog.image_view.set_crop_box((200, 0, 700, 400))
 
     dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (120, 80, 780, 320)
+    dialog.image_view.set_crop_box((200, 0, 700, 400))
+    dialog.detect_inside_crop_button.click()
     assert dialog.image_view.crop_box == (200, 80, 700, 320)
 
 

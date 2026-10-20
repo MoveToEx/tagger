@@ -104,7 +104,7 @@ In ARB mode, it finds one bucket with the closest aspect ratio, and upscales pro
 
 Respects global ARB settings.
 
-**Detect** trims nearly single-color borders inside the current crop, keeping the active ARB bucket or aspect ratio. **Threshold** controls the maximum color difference per channel (0–255, default 24) and retains its value while navigating between images. **Auto detect** also runs detection on the current image and when navigating to images without a staged crop. Detection only stages changes; **Finish** saves them, and **Reset** restores the full image.
+**Detect** trims nearly single-color borders from the full image, while **Detect Inside Crop** limits detection to the current crop. Both keep the active ARB bucket or aspect ratio. **Threshold** controls the maximum color difference per channel (0–255, default 24) and retains its value while navigating between images. **Auto detect** runs full-image detection on images without a staged crop. Detection only stages changes; **Finish** saves them, and **Reset** restores the full image.
 
 #### Grid preview
 
