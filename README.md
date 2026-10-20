@@ -104,6 +104,8 @@ In ARB mode, it finds one bucket with the closest aspect ratio, and upscales pro
 
 Respects global ARB settings.
 
+**Detect** trims nearly single-color borders inside the current crop, keeping the active ARB bucket or aspect ratio. **Threshold** controls the maximum color difference per channel (0–255, default 24) and retains its value while navigating between images. **Auto detect** also runs detection on the current image and when navigating to images without a staged crop. Detection only stages changes; **Finish** saves them, and **Reset** restores the full image.
+
 #### Grid preview
 
 _Image_ > _Grid Preview_ visualizes what an image looks like and how large a DiT token occupies when it's used for training. It scales and crops the image according your training parameters, and overlays a grid over the current image so each cell represents a DiT token.  

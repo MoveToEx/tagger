@@ -5,14 +5,16 @@ from math import isfinite
 from pathlib import Path
 from typing import override
 
+from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QIntValidator
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QDialog, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton,
+    QApplication, QButtonGroup, QCheckBox, QDialog, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton, QSpinBox,
     QToolButton, QVBoxLayout, QWidget,
 )
 
+from tagger.crop_detection import DEFAULT_COLOR_TOLERANCE, detect_crop_box
 from tagger.crop_storage import (
     CropBox, FileStamp, crop_disabled_reason, crop_image, file_stamp, load_crop_image,
 )
@@ -21,7 +23,7 @@ from tagger.preprocess import PreprocessOptions, closest_bucket
 from tagger.ui.dialogs.transparency import TransparencySelectionDialog
 from tagger.ui.mouse_navigation import MouseNavigation
 from tagger.ui.preview.crop import CropImageView
-from tagger.ui.widgets import stabilize_radio_button, stabilize_widget_size
+from tagger.ui.widgets import stabilize_checkbox, stabilize_radio_button, stabilize_widget_size
 
 
 ASPECT_RATIOS = ("Free", "Original", "1:1", "4:3", "3:4", "16:9", "9:16", "1:2", "2:1", "3:2", "2:3", "Custom")
@@ -140,6 +142,7 @@ class CropDialog(QDialog):
         self._saving = False
         self._allow_close = False
         self._current_loaded = False
+        self._current_image: Image.Image | None = None
 
         self.progress_label = QLabel()
         self.path_label = QLabel()
@@ -152,6 +155,52 @@ class CropDialog(QDialog):
         self.options_panel = QWidget()
         options_layout = QVBoxLayout(self.options_panel)
         options_layout.setContentsMargins(12, 0, 0, 0)
+
+        self.size_label = QLabel()
+        self.size_label.setWordWrap(True)
+        self.reset_button = QPushButton("Reset")
+        self.reset_button.setAutoDefault(False)
+        self.reset_button.clicked.connect(self._reset)
+        size_row = QHBoxLayout()
+        size_row.addWidget(self.size_label, 1)
+        size_row.addWidget(self.reset_button, 0, Qt.AlignmentFlag.AlignRight)
+        options_layout.addLayout(size_row)
+
+        self.detection_threshold_input = QSpinBox()
+        self.detection_threshold_input.setRange(0, 255)
+        self.detection_threshold_input.setValue(DEFAULT_COLOR_TOLERANCE)
+        self.detection_threshold_input.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.detection_threshold_input.setAccessibleName("Detection threshold")
+        self.detection_threshold_input.setToolTip(
+            "Maximum difference per color channel (0–255). "
+            "Higher values allow more color variation in borders."
+        )
+        stabilize_widget_size(
+            self.detection_threshold_input, minimum_width=72, vertical_padding=2,
+        )
+        threshold_label = QLabel("Threshold")
+        threshold_label.setBuddy(self.detection_threshold_input)
+        threshold_row = QHBoxLayout()
+        threshold_row.addWidget(threshold_label)
+        threshold_row.addWidget(self.detection_threshold_input)
+        threshold_row.addStretch(1)
+
+        self.detect_button = QPushButton("Detect")
+        self.detect_button.setAutoDefault(False)
+        self.detect_button.setToolTip(
+            "Trim single-color borders inside the current crop, keeping the active ratio."
+        )
+        self.detect_button.clicked.connect(self._detect)
+        self.auto_detect_checkbox = QCheckBox("Auto detect")
+        self.auto_detect_checkbox.setToolTip(
+            "Detect borders when opening an image without a staged crop."
+        )
+        stabilize_checkbox(self.auto_detect_checkbox)
+        self.auto_detect_checkbox.toggled.connect(self._auto_detect)
+        detection_row = QHBoxLayout()
+        detection_row.addWidget(self.detect_button, 0, Qt.AlignmentFlag.AlignLeft)
+        detection_row.addWidget(self.auto_detect_checkbox)
+        detection_row.addStretch(1)
 
         def radio_button(text: str) -> QRadioButton:
             button = QRadioButton(text)
@@ -267,11 +316,8 @@ class CropDialog(QDialog):
         self.ratio_error = QLabel()
         self.ratio_error.setWordWrap(True)
         options_layout.addWidget(self.ratio_error)
-        self.size_label = QLabel()
-        options_layout.addWidget(self.size_label)
-        self.reset_button = QPushButton("Reset Crop")
-        self.reset_button.clicked.connect(self._reset)
-        options_layout.addWidget(self.reset_button)
+        options_layout.addLayout(threshold_row)
+        options_layout.addLayout(detection_row)
         options_layout.addStretch(1)
         self.options_panel.setFixedWidth(280)
 
@@ -310,8 +356,9 @@ class CropDialog(QDialog):
     def dirty_paths(self) -> set[Path]:
         return {path for path, draft in self._drafts.items() if draft.box != draft.original_box}
 
-    def _load_current(self) -> None:
+    def _load_current(self, *, auto_detect: bool = False) -> None:
         self._current_loaded = False
+        self._current_image = None
         if not self.paths:
             self.path_label.setText("No images selected.")
             self._update_buttons()
@@ -354,11 +401,14 @@ class CropDialog(QDialog):
                 ratio = None
                 self.ratio_error.setText(str(exc))
             self.image_view.set_image(image, draft.box, ratio)
+            self._current_image = image
             self._current_loaded = True
         finally:
             self._loading = False
         self._update_size_label()
         self._update_buttons()
+        if auto_detect:
+            self._auto_detect(self.auto_detect_checkbox.isChecked())
 
     def _update_mode_controls(self, draft: _CropDraft) -> None:
         aspect_ratio_mode = draft.mode == ASPECT_RATIO_MODE
@@ -398,7 +448,7 @@ class CropDialog(QDialog):
 
     def _update_size_label(self) -> None:
         left, top, right, bottom = self.image_view.crop_box
-        self.size_label.setText(f"Crop: {right - left} × {bottom - top} pixels")
+        self.size_label.setText(f"{right - left} × {bottom - top} pixels")
 
     def _crop_changed(self, box: CropBox) -> None:
         if self._loading or not self._current_loaded:
@@ -476,11 +526,33 @@ class CropDialog(QDialog):
         draft.arb_height_text = None
         self._load_current()
 
+    def _detect(self) -> None:
+        if not self._current_loaded or self._saving or self._current_image is None:
+            return
+        draft = self._drafts[self.paths[self.current_index]]
+        try:
+            box = detect_crop_box(
+                self._current_image, draft.box,
+                aspect_ratio=draft.ratio(self._arb_options),
+                tolerance=self.detection_threshold_input.value(),
+            )
+        except ValueError as exc:
+            self.ratio_error.setText(str(exc))
+            return
+        self.ratio_error.clear()
+        self.image_view.set_crop_box(box)
+
+    def _auto_detect(self, enabled: bool) -> None:
+        if enabled and self._current_loaded:
+            draft = self._drafts[self.paths[self.current_index]]
+            if draft.box == draft.original_box:
+                self._detect()
+
     def _navigate(self, delta: int) -> None:
         index = self.current_index + delta
         if not self._saving and 0 <= index < len(self.paths):
             self.current_index = index
-            self._load_current()
+            self._load_current(auto_detect=True)
 
     def _update_buttons(self) -> None:
         self.previous_button.setEnabled(not self._saving and self.current_index > 0)

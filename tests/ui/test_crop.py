@@ -293,6 +293,188 @@ def test_missing_image_can_be_navigated_past(qtbot, tmp_path) -> None:
     dialog.finish_button.click()
 
 
+def _bordered_image(path: Path) -> Path:
+    image = Image.new("RGB", (900, 400), "black")
+    image.paste("blue", (120, 80, 780, 320))
+    image.save(path)
+    return path
+
+
+def test_detect_stages_border_trim_and_finish_saves_it(qtbot, tmp_path) -> None:
+    path = _bordered_image(tmp_path / "border.png")
+    original = path.read_bytes()
+    dialog = CropDialog([path])
+    qtbot.addWidget(dialog)
+
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (120, 80, 780, 320)
+    assert dialog.dirty_paths == {path}
+    assert dialog.size_label.text() == "660 × 240 pixels"
+    assert path.read_bytes() == original
+
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (120, 80, 780, 320)
+    dialog.finish_button.click()
+    with Image.open(path) as image:
+        assert image.size == (660, 240)
+
+
+def test_detect_only_trims_inside_current_crop(qtbot, tmp_path) -> None:
+    dialog = CropDialog([_bordered_image(tmp_path / "border.png")])
+    qtbot.addWidget(dialog)
+    dialog.image_view.set_crop_box((200, 0, 700, 400))
+
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (200, 80, 700, 320)
+
+
+def _layered_border_image(path: Path) -> Path:
+    image = Image.new("RGB", (100, 80), "black")
+    image.paste((20, 20, 20), (5, 5, 95, 75))
+    image.paste("blue", (20, 15, 80, 65))
+    image.save(path)
+    return path
+
+
+def test_threshold_controls_border_color_distance_and_survives_reset(qtbot, tmp_path) -> None:
+    dialog = CropDialog([_layered_border_image(tmp_path / "border.png")])
+    qtbot.addWidget(dialog)
+    assert dialog.detection_threshold_input.value() == 24
+    assert_stable_widget_size(dialog.detection_threshold_input, minimum_width=72, vertical_padding=2)
+
+    dialog.detection_threshold_input.setValue(0)
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (5, 5, 95, 75)
+    dialog.reset_button.click()
+    assert dialog.detection_threshold_input.value() == 0
+
+    dialog.detection_threshold_input.setValue(24)
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (20, 15, 80, 65)
+
+
+def test_auto_detect_uses_shared_threshold_while_navigating(qtbot, tmp_path) -> None:
+    paths = [_layered_border_image(tmp_path / name) for name in ("a.png", "b.png")]
+    dialog = CropDialog(paths)
+    qtbot.addWidget(dialog)
+    dialog.detection_threshold_input.setValue(0)
+    dialog.auto_detect_checkbox.click()
+    assert dialog.image_view.crop_box == (5, 5, 95, 75)
+
+    dialog.detection_threshold_input.setValue(24)
+    dialog.next_button.click()
+    assert dialog.detection_threshold_input.value() == 24
+    assert dialog.image_view.crop_box == (20, 15, 80, 65)
+    dialog.previous_button.click()
+    assert dialog.detection_threshold_input.value() == 24
+    assert dialog.image_view.crop_box == (5, 5, 95, 75)
+
+
+def test_detect_keeps_active_arb_bucket_and_fits_inside_content(qtbot, tmp_path) -> None:
+    dialog = CropDialog(
+        [_bordered_image(tmp_path / "border.png")],
+        options=PreprocessOptions(
+            training_resolution=512, arb_step=256, arb_min_size=256, arb_max_size=768,
+        ),
+    )
+    qtbot.addWidget(dialog)
+    dialog.mode_buttons[ARB_MODE].click()
+    assert dialog.image_view.crop_box == (0, 50, 900, 350)
+
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (120, 90, 780, 310)
+    assert dialog.mode_buttons[ARB_MODE].isChecked()
+    assert dialog.arb_width_input.text() == "768"
+    assert dialog.arb_height_input.text() == "256"
+    assert dialog.image_view.aspect_ratio == pytest.approx(3)
+    assert not dialog.image_view.resize_enabled
+
+    dialog.arb_width_decrease_button.click()
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (210, 80, 690, 320)
+    assert dialog.arb_width_input.text() == "512"
+
+
+def test_detect_keeps_custom_aspect_ratio(qtbot, tmp_path) -> None:
+    dialog = CropDialog([_bordered_image(tmp_path / "border.png")])
+    qtbot.addWidget(dialog)
+    dialog.ratio_buttons["Custom"].click()
+    dialog.custom_ratio.setText("2:1")
+
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == (210, 80, 690, 320)
+    assert dialog.custom_ratio.text() == "2:1"
+    assert dialog.image_view.aspect_ratio == pytest.approx(2)
+
+
+def test_auto_detect_trims_uncropped_images_and_preserves_staged_edits(qtbot, tmp_path) -> None:
+    paths = [_bordered_image(tmp_path / name) for name in ("a.png", "b.png")]
+    original = [path.read_bytes() for path in paths]
+    dialog = CropDialog(paths)
+    qtbot.addWidget(dialog)
+    assert not dialog.auto_detect_checkbox.isChecked()
+    assert not dialog.dirty_paths
+
+    dialog.auto_detect_checkbox.click()
+    assert dialog.image_view.crop_box == (120, 80, 780, 320)
+    dialog.image_view.set_crop_box((200, 100, 700, 300))
+    dialog.next_button.click()
+    assert dialog.image_view.crop_box == (120, 80, 780, 320)
+    assert dialog.dirty_paths == set(paths)
+    dialog.previous_button.click()
+    assert dialog.image_view.crop_box == (200, 100, 700, 300)
+    assert [path.read_bytes() for path in paths] == original
+
+    dialog.auto_detect_checkbox.setChecked(False)
+    dialog.reset_button.click()
+    dialog.next_button.click()
+    dialog.previous_button.click()
+    assert dialog.image_view.crop_box == (0, 0, 900, 400)
+
+
+def test_auto_detect_does_not_replace_manual_crop_when_enabled(qtbot, tmp_path) -> None:
+    dialog = CropDialog([_bordered_image(tmp_path / "border.png")])
+    qtbot.addWidget(dialog)
+    dialog.image_view.set_crop_box((100, 50, 800, 350))
+    dialog.auto_detect_checkbox.click()
+    assert dialog.image_view.crop_box == (100, 50, 800, 350)
+
+
+def test_reset_with_auto_detect_allows_inspecting_full_image(qtbot, tmp_path) -> None:
+    dialog = CropDialog([_bordered_image(tmp_path / "border.png")])
+    qtbot.addWidget(dialog)
+    dialog.auto_detect_checkbox.click()
+    dialog.reset_button.click()
+    assert dialog.image_view.crop_box == (0, 0, 900, 400)
+    assert not dialog.dirty_paths
+    assert dialog.auto_detect_checkbox.isChecked()
+
+
+def test_auto_detect_handles_uniform_and_unreadable_images(qtbot, tmp_path) -> None:
+    paths = [_image(tmp_path / "plain.png"), tmp_path / "missing.png", _bordered_image(tmp_path / "border.png")]
+    dialog = CropDialog(paths)
+    qtbot.addWidget(dialog)
+    dialog.auto_detect_checkbox.click()
+    assert not dialog.dirty_paths
+    dialog.next_button.click()
+    assert not dialog.detect_button.isEnabled()
+    dialog.next_button.click()
+    assert dialog.image_view.crop_box == (120, 80, 780, 320)
+    assert dialog.dirty_paths == {paths[2]}
+
+
+def test_detect_does_not_apply_invalid_ratio(qtbot, tmp_path) -> None:
+    dialog = CropDialog([_bordered_image(tmp_path / "border.png")])
+    qtbot.addWidget(dialog)
+    dialog.ratio_buttons["Custom"].click()
+    dialog.custom_ratio.setText("0:1")
+    box = dialog.image_view.crop_box
+    dialog.detect_button.click()
+    assert dialog.image_view.crop_box == box
+    assert dialog.ratio_error.text()
+    assert not dialog.finish_button.isEnabled()
+
+
 def test_menu_opens_picker_then_editor_and_refreshes_saved_images(qtbot, tmp_path, monkeypatch) -> None:
     path = _image(tmp_path / "a.png")
     window = MainWindow()

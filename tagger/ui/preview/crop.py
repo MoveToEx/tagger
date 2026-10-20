@@ -80,6 +80,10 @@ class CropImageView(QWidget):
         left, top = (self._pixmap.width() - width) / 2, (self._pixmap.height() - height) / 2
         self._set_rect(QRectF(left, top, width, height))
 
+    def set_crop_box(self, box: CropBox) -> None:
+        left, top, right, bottom = box
+        self._set_rect(QRectF(left, top, right - left, bottom - top))
+
     def _set_rect(self, rect: QRectF) -> None:
         width, height = self._pixmap.width(), self._pixmap.height()
         crop_width = max(1, min(width, round(rect.width())))
