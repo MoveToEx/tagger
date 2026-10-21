@@ -85,6 +85,9 @@ class WindowActions:
         self.global_search_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
         self.global_search_action.triggered.connect(self.window.dialogs._open_global_search)
 
+        self.rare_tags_action = QAction("Find Rare Tags...", self.window)
+        self.rare_tags_action.triggered.connect(self.window.dialogs._open_rare_tags)
+
         self.correlation_analysis_action = QAction(
             "Correlation Analysis...", self.window
         )
@@ -272,6 +275,7 @@ class WindowActions:
         image_menu.addAction(self.mask_editor_action)
         tags_menu = self.window.menuBar().addMenu("&Tags")
         tags_menu.addAction(self.global_search_action)
+        tags_menu.addAction(self.rare_tags_action)
         tags_menu.addSeparator()
         tags_menu.addAction(self.correlation_analysis_action)
         tags_menu.addAction(self.probe_action)
@@ -357,6 +361,9 @@ class WindowActions:
         )
         self.window.search_input.setEnabled(count > 0)
         self.global_search_action.setEnabled(count > 0)
+        self.rare_tags_action.setEnabled(
+            count > 0 and self.window.tag_library.danbooru_available
+        )
         self.correlation_analysis_action.setEnabled(count > 0)
         self.probe_action.setEnabled(
             count > 0

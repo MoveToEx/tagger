@@ -39,6 +39,7 @@ from tagger.ui.dialogs.crop import CropDialog, CropSelectionDialog
 from tagger.ui.dialogs.deduplicate import DeduplicateDialog
 from tagger.ui.dialogs.delete_filter import DeleteFilterDialog
 from tagger.ui.dialogs.global_search import GlobalTagSearchDialog
+from tagger.ui.dialogs.rare_tags import RareTagImagesDialog, RareTagsDialog
 from tagger.ui.dialogs.frame_extraction import (
     FrameExtractionDialog,
     FrameExtractionProgressDialog,
@@ -75,6 +76,8 @@ class DialogController:
         self._frame_extraction_video_dialog: FrameExtractionVideoDialog | None = None
         self._frame_extraction_dialog: FrameExtractionDialog | None = None
         self._frame_extraction_progress_dialog: FrameExtractionProgressDialog | None = None
+        self._rare_tags_dialog: RareTagsDialog | None = None
+        self._rare_tag_images_dialog: RareTagImagesDialog | None = None
 
     def _open_frame_extraction(self) -> None:
         directory = self.window.directory
@@ -163,6 +166,53 @@ class DialogController:
             tag_library=self.window.tag_library,
             initial_pattern=initial_pattern,
         ).exec()
+
+    def _open_rare_tags(self) -> None:
+        if (
+            not self.window.catalog.entries
+            or not self.window.tag_library.danbooru_available
+        ):
+            return
+        if self._rare_tags_dialog is not None:
+            self._rare_tags_dialog.show()
+            self._rare_tags_dialog.raise_()
+            self._rare_tags_dialog.activateWindow()
+            return
+        dialog = RareTagsDialog(
+            self.window.catalog.entries,
+            self.window.tag_library,
+            self.window,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.tag_activated.connect(self._open_rare_tag_images)
+        dialog.destroyed.connect(partial(self._rare_tags_destroyed, dialog))
+        self._rare_tags_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _open_rare_tag_images(self, tag: str) -> None:
+        if not self.window.catalog.entries:
+            return
+        entries = [entry for entry in self.window.catalog.entries if tag in entry.tags]
+        if not entries:
+            return
+        if self._rare_tag_images_dialog is not None:
+            self._rare_tag_images_dialog.close()
+            self._rare_tag_images_dialog = None
+        dialog = RareTagImagesDialog(
+            tag,
+            entries,
+            self.window,
+            root_directory=self.window.directory,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.image_activated.connect(self._select_image_from_rare_tags)
+        dialog.destroyed.connect(partial(self._rare_tag_images_destroyed, dialog))
+        self._rare_tag_images_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _open_review(self) -> None:
         if not self.window.catalog.entries or self.window.directory is None:
@@ -674,6 +724,18 @@ class DialogController:
     def _complex_filter_destroyed(self, _object: QObject) -> None:
         self._complex_filter_dialog = None
 
+    def _rare_tags_destroyed(
+        self, dialog: RareTagsDialog, _object: QObject | None = None
+    ) -> None:
+        if self._rare_tags_dialog is dialog:
+            self._rare_tags_dialog = None
+
+    def _rare_tag_images_destroyed(
+        self, dialog: RareTagImagesDialog, _object: QObject | None = None
+    ) -> None:
+        if self._rare_tag_images_dialog is dialog:
+            self._rare_tag_images_dialog = None
+
     def _probe_destroyed(self, _object: QObject) -> None:
         self._probe_dialog = None
 
@@ -686,6 +748,10 @@ class DialogController:
         self.window._select_optional_row(row)
 
     def _select_image_from_probe(self, image_path: Path) -> None:
+        row = self.window.catalog.row_for_image(image_path)
+        self.window._select_optional_row(row)
+
+    def _select_image_from_rare_tags(self, image_path: Path) -> None:
         row = self.window.catalog.row_for_image(image_path)
         self.window._select_optional_row(row)
 

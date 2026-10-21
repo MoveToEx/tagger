@@ -32,6 +32,7 @@ class TagLibrary(QObject):
         self.underscores_to_spaces = underscores_to_spaces
         self.escape_parentheses = escape_parentheses
         self._danbooru: dict[str, tuple[str, int]] = {}
+        self._danbooru_raw_keys: set[str] = set()
         self._folder: dict[str, tuple[str, int]] = {}
         self._ranked: list[_RankedTag] = []
         self._folder_ranked: list[_RankedTag] = []
@@ -40,11 +41,13 @@ class TagLibrary(QObject):
 
     def reload_danbooru(self) -> None:
         records: dict[str, tuple[str, int]] = {}
+        raw_keys: set[str] = set()
         try:
             raw_records = _read_binary_records(self.library_path)
         except FileNotFoundError:
             raw_records = []
         for raw_name, count in raw_records:
+            raw_keys.add(_search_key(raw_name))
             name = transform_tag_name(
                 raw_name,
                 underscores_to_spaces=self.underscores_to_spaces,
@@ -55,6 +58,7 @@ class TagLibrary(QObject):
             if existing is None or count > existing[1]:
                 records[key] = (name, count)
         self._danbooru = records
+        self._danbooru_raw_keys = raw_keys
         self._rebuild_index()
         self._rebuild_folder_ranking()
         self.changed.emit()
@@ -117,6 +121,16 @@ class TagLibrary(QObject):
         return len(self._danbooru) + sum(
             key not in self._danbooru for key in self._folder
         )
+
+    @property
+    def danbooru_available(self) -> bool:
+        """Whether the local Danbooru tag library file is present."""
+        return self.library_path.is_file()
+
+    def is_danbooru_tag(self, tag: str) -> bool:
+        """Return whether *tag* is present in the loaded Danbooru library."""
+        key = _search_key(tag)
+        return key in self._danbooru or key in self._danbooru_raw_keys
 
     def _matching_danbooru_tags(
         self, query: str, completed: set[str]

@@ -36,6 +36,7 @@ def test_tags_menu_labels_and_order(qtbot) -> None:
         for action in tags_menu.actions()
     ] == [
         "Global Search...",
+        "Find Rare Tags...",
         "<separator>",
         "Correlation Analysis...",
         "Probe...",
