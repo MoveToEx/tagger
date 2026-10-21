@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -142,6 +143,9 @@ class MainWindow(QMainWindow):
             self.tag_input, self.tag_library
         )
         stabilize_widget_size(self.tag_input, minimum_width=220)
+        tag_input_minimum_width = self.tag_input.width()
+        self.tag_input.setMinimumWidth(tag_input_minimum_width)
+        self.tag_input.setMaximumWidth(16_777_215)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search tags (* wildcard)")
@@ -161,6 +165,7 @@ class MainWindow(QMainWindow):
         self.add_tag_button = QPushButton("+")
         self.add_tag_button.setToolTip("Add these tags to the current image")
         self.add_tag_button.setFixedWidth(34)
+        self.add_tag_button.setFixedHeight(self.tag_input.height())
         self.delete_tag_button = QPushButton("Delete Selected")
         self.add_tag_button.clicked.connect(self.tags._add_current_tags)
         self.delete_tag_button.clicked.connect(self.tags._delete_selected_tags)
@@ -168,7 +173,10 @@ class MainWindow(QMainWindow):
 
         input_buttons = QHBoxLayout()
         input_buttons.setContentsMargins(0, 0, 0, 0)
-        input_buttons.addWidget(self.tag_input)
+        self.tag_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        input_buttons.addWidget(self.tag_input, 1)
         input_buttons.addWidget(self.add_tag_button)
 
         tag_panel = QWidget()
